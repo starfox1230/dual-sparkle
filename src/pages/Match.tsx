@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,54 +25,15 @@ const MatchPage = () => {
   const [roundProcessed, setRoundProcessed] = useState(false);
   const [nextQuestionTriggered, setNextQuestionTriggered] = useState(false);
   const { toast } = useToast();
-
-  // Refs to avoid stale closures in realtime handlers
-  const currentQuestionRef = useRef<number>(0);
-  const matchRef = useRef<Match | null>(null);
-  const playersRef = useRef<Player[]>([]);
-  const isHostRef = useRef<boolean>(false);
-  const roundProcessedRef = useRef<boolean>(false);
-  const revealAnswersRef = useRef<() => void>(() => {});
+  // The currentQuestionRef was causing a stale closure issue in the subscription. It has been removed.
 
   const currentQuestion = match?.quiz.questions[match.current_question_index];
-  const isHost = !!(currentUser && match && currentUser.id === match.host_uid);
+  const isHost = currentUser && match && currentUser.id === match.host_uid;
   const currentPlayer = players.find(p => p.uid === currentUser?.id);
   const otherPlayer = players.find(p => p.uid !== currentUser?.id);
   const allReady = players.length === 2 && players.every(p => p.ready);
+  const hasAnswered = answers.some(a => a.uid === currentUser?.id && a.question_index === match?.current_question_index);
 
-  // Derived answer state for the *current question*
-  const answersForCurrent = useMemo(
-    () => answers.filter(a => a.question_index === match?.current_question_index),
-    [answers, match?.current_question_index]
-  );
-  const answeredUids = useMemo(() => new Set(answersForCurrent.map(a => a.uid)), [answersForCurrent]);
-  const iHaveAnswered = !!(currentUser && answeredUids.has(currentUser.id));
-  const otherHasAnswered = !!(otherPlayer && answeredUids.has(otherPlayer.uid));
-  const hasAnswered = iHaveAnswered;
-
-  // Keep refs in sync
-  useEffect(() => {
-    matchRef.current = match;
-    isHostRef.current = isHost;
-  }, [match, isHost]);
-
-  useEffect(() => {
-    playersRef.current = players;
-  }, [players]);
-
-  useEffect(() => {
-    roundProcessedRef.current = roundProcessed;
-  }, [roundProcessed]);
-
-  useEffect(() => {
-    currentQuestionRef.current = match?.current_question_index ?? 0;
-  }, [match?.current_question_index]);
-
-  useEffect(() => {
-    revealAnswersRef.current = () => {}; // placeholder until assigned after revealAnswers is defined
-  }, []);
-
-  // Auth
   useEffect(() => {
     if (!matchId) return;
 
@@ -93,7 +54,6 @@ const MatchPage = () => {
     initAuth();
   }, [matchId]);
 
-  // Initial fetch + realtime
   useEffect(() => {
     if (!matchId || !currentUser) return;
 
@@ -105,7 +65,9 @@ const MatchPage = () => {
         .eq('id', matchId)
         .single();
 
-      if (matchData) setMatch(matchData);
+      if (matchData) {
+        setMatch(matchData);
+      }
 
       // Fetch players
       const { data: playersData } = await supabase
@@ -115,7 +77,7 @@ const MatchPage = () => {
 
       if (playersData) {
         setPlayers(playersData);
-
+        
         // Check if current user needs to join
         const isPlayerInMatch = playersData.some(p => p.uid === currentUser.id);
         if (!isPlayerInMatch && playersData.length < 2) {
@@ -131,77 +93,53 @@ const MatchPage = () => {
           .eq('match_id', matchId)
           .eq('question_index', matchData.current_question_index);
 
-        if (answersData) setAnswers(answersData);
+        if (answersData) {
+          setAnswers(answersData);
+        }
       }
     };
 
     fetchData();
 
-    // Realtime subscriptions
+    // Set up realtime subscriptions
     const matchChannel = supabase
       .channel(`match:${matchId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'matches', filter: `id=eq.${matchId}` },
-        (payload) => {
-          if (payload.new) {
-            setMatch(payload.new as Match);
-          }
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'matches', 
+        filter: `id=eq.${matchId}` 
+      }, (payload) => {
+        if (payload.new) {
+          setMatch(payload.new as Match);
         }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'players', filter: `match_id=eq.${matchId}` },
-        () => {
-          // Re-fetch players (keeps ready/score in sync)
-          (async () => {
-            const { data: playersData } = await supabase
-              .from('players')
-              .select('*')
-              .eq('match_id', matchId);
-            if (playersData) setPlayers(playersData);
-          })();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'answers', filter: `match_id=eq.${matchId}` },
-        (payload) => {
-          if (!payload.new) return;
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'players',
+        filter: `match_id=eq.${matchId}`
+      }, () => {
+        fetchData();
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'answers',
+        filter: `match_id=eq.${matchId}`
+      }, (payload) => {
+        if (payload.new) {
           const newAnswer = payload.new as Answer;
-          if (newAnswer.question_index !== currentQuestionRef.current) return;
-
-          setAnswers(prev => {
-            const next = [
-              ...prev.filter(a => !(a.uid === newAnswer.uid && a.question_index === newAnswer.question_index)),
-              newAnswer,
-            ];
-
-            // Host: flip instantly when both have answered (no waiting for timer)
-            const m = matchRef.current;
-            if (
-              m &&
-              isHostRef.current &&
-              m.status === 'answering' &&
-              !roundProcessedRef.current
-            ) {
-              const onThisQ = next.filter(a => a.question_index === m.current_question_index);
-              const uniqueUids = new Set(onThisQ.map(a => a.uid));
-              const playerCount = playersRef.current.length;
-
-              if (playerCount > 0 && uniqueUids.size === playerCount) {
-                // Mark processed and reveal
-                roundProcessedRef.current = true;
-                setRoundProcessed(true);
-                // Call via ref to avoid stale closure
-                revealAnswersRef.current();
-              }
-            }
-
-            return next;
-          });
+          // FIX: Removed the check against a stale currentQuestionRef.
+          // The `answers` state is cleared for each new question, and components
+          // filter by the current question index, making this safe.
+          // This ensures all clients receive answer updates in real-time.
+          setAnswers(prev => [
+            ...prev.filter(a => !(a.uid === newAnswer.uid && a.question_index === newAnswer.question_index)),
+            newAnswer,
+          ]);
         }
-      )
+      })
       .subscribe();
 
     return () => {
@@ -209,7 +147,6 @@ const MatchPage = () => {
     };
   }, [matchId, currentUser]);
 
-  // Auto-advance from question_reveal -> answering after 5s (host only)
   useEffect(() => {
     if (!match || !isHost || match.status !== 'question_reveal') return;
 
@@ -220,12 +157,11 @@ const MatchPage = () => {
     return () => clearTimeout(timeout);
   }, [match, isHost]);
 
-  // Reset local selection each question
   useEffect(() => {
     setSelectedChoice(null);
   }, [match?.current_question_index]);
 
-  // Clear answers cache for the new question to avoid stale indicators
+  // Clear answers when a new question is revealed to avoid using stale data
   useEffect(() => {
     if (match?.status === 'question_reveal') {
       setAnswers([]);
@@ -240,78 +176,72 @@ const MatchPage = () => {
   }, [match?.status]);
 
   const revealAnswers = useCallback(async () => {
-    const m = matchRef.current;
-    const qIndex = currentQuestionRef.current;
-    const currMatch = m ?? match;
-    const currQuestion =
-      currMatch?.quiz.questions[currMatch.current_question_index];
-
-    if (!currMatch || !currQuestion) return;
+    if (!match || !currentQuestion) return;
 
     try {
-      // Local optimistic update so Timer stops and results show immediately
+      // Update local state so the round end screen persists until players confirm
       setPlayers(prev =>
         prev.map(p => {
-          const ans = answers.find(a => a.uid === p.uid && a.question_index === qIndex);
-          const isCorrect = ans ? ans.choice_text === currQuestion.correctAnswer : false;
+          const answer = answers.find(a => a.uid === p.uid && a.question_index === match.current_question_index);
+          const isCorrect = answer ? answer.choice_text === currentQuestion.correctAnswer : false;
           const points = isCorrect ? 1 : 0;
           return { ...p, score: (p.score || 0) + points, ready: false };
         })
       );
-
       setAnswers(prev =>
         prev.map(a => {
-          if (a.question_index !== qIndex) return a;
-          const isCorrect = a.choice_text === currQuestion.correctAnswer;
+          if (a.question_index !== match.current_question_index) return a;
+          const isCorrect = a.choice_text === currentQuestion.correctAnswer;
           const points = isCorrect ? 1 : 0;
           return { ...a, is_correct: isCorrect, points };
         })
       );
 
-      // Optimistic match status change to unmount Timer
-      setMatch(prev => (prev ? { ...prev, status: 'round_end', phase_start: new Date().toISOString() } : prev));
+      // Optimistically update match status so the timer stops immediately
+      setMatch(prev => prev ? { ...prev, status: 'round_end', phase_start: new Date().toISOString() } : prev);
 
-      await startPhase(currMatch.id, 'round_end');
+      await startPhase(match.id, 'round_end');
+      
+      const currentAnswers = answers.filter(a => a.question_index === match.current_question_index);
 
-      // Persist correctness & points and reset readies
-      for (const p of playersRef.current) {
-        const ans = answers.find(a => a.uid === p.uid && a.question_index === qIndex);
-        const isCorrect = ans ? ans.choice_text === currQuestion.correctAnswer : false;
+      for (const answer of currentAnswers) {
+        const isCorrect = answer.choice_text === currentQuestion.correctAnswer;
         const points = isCorrect ? 1 : 0;
 
-        if (ans) {
-          const { error: ansErr } = await supabase
-            .from('answers')
-            .update({ is_correct: isCorrect, points })
-            .eq('match_id', currMatch.id)
-            .eq('uid', p.uid)
-            .eq('question_index', qIndex);
-          if (ansErr) console.error('Answer update error:', ansErr);
-        }
+        const { error: ansErr } = await supabase
+          .from('answers')
+          .update({ is_correct: isCorrect, points })
+          .eq('match_id', match.id)
+          .eq('uid', answer.uid)
+          .eq('question_index', match.current_question_index);
+        if (ansErr) console.error('Answer update error:', ansErr);
 
-        const { error: playerErr } = await supabase
-          .from('players')
-          .update({ score: (p.score || 0) + points, ready: false })
-          .eq('match_id', currMatch.id)
-          .eq('uid', p.uid);
-        if (playerErr) console.error('Player score update error:', playerErr);
+        const player = players.find(p => p.uid === answer.uid);
+        if (player) {
+          const { error: playerErr } = await supabase
+            .from('players')
+            .update({ score: (player.score || 0) + points, ready: false })
+            .eq('match_id', match.id)
+            .eq('uid', answer.uid);
+          if (playerErr) console.error('Player score update error:', playerErr);
+        }
+      }
+
+      for (const p of players) {
+        if (!currentAnswers.some(a => a.uid === p.uid)) {
+          const { error: playerErr } = await supabase
+            .from('players')
+            .update({ ready: false })
+            .eq('match_id', match.id)
+            .eq('uid', p.uid);
+          if (playerErr) console.error('Player ready reset error:', playerErr);
+        }
       }
     } catch (error) {
       console.error('Reveal answers error:', error);
     }
-  }, [match, answers]);
+  }, [match, currentQuestion, answers, players]);
 
-  // Expose latest revealAnswers via ref for realtime callback
-  useEffect(() => {
-    revealAnswersRef.current = () => {
-      // Call the memoized function with latest closures
-      (async () => {
-        await revealAnswers();
-      })();
-    };
-  }, [revealAnswers]);
-
-  // Host-side auto reveal (fallback if realtime path misses)
   useEffect(() => {
     if (!match || !isHost) return;
 
@@ -321,8 +251,11 @@ const MatchPage = () => {
     }
 
     if (roundProcessed) return;
-
-    const currentAnswers = answers.filter(a => a.question_index === match.current_question_index);
+    
+    // FIX: This logic will now work correctly because the `answers` state is properly synced.
+    const currentAnswers = answers.filter(
+      a => a.question_index === match.current_question_index
+    );
     const allAnswered = currentAnswers.length === players.length && players.length > 0;
 
     if (allAnswered) {
@@ -331,19 +264,26 @@ const MatchPage = () => {
       return;
     }
 
-    // Fallback: reveal when timer hits zero
     const now = Date.now();
     const start = new Date(match.phase_start).getTime();
     const remaining = match.timer_seconds * 1000 - (now - start);
+    
+    if (remaining <= 0) {
+      if (!roundProcessed) {
+        setRoundProcessed(true);
+        revealAnswers();
+      }
+      return;
+    }
+
     const timeout = setTimeout(() => {
       setRoundProcessed(true);
       revealAnswers();
-    }, Math.max(0, remaining));
+    }, remaining);
 
     return () => clearTimeout(timeout);
   }, [match, answers, players, isHost, roundProcessed, revealAnswers]);
 
-  // Next question when both press Ready on round_end (host only)
   useEffect(() => {
     if (!match || !isHost) return;
 
@@ -418,7 +358,7 @@ const MatchPage = () => {
 
     setSelectedChoice(choiceIndex);
 
-    const newAnswer = {
+     const newAnswer: Omit<Answer, 'id' | 'created_at' | 'is_correct' | 'points'> = {
       match_id: match.id,
       uid: currentUser.id,
       question_index: match.current_question_index,
@@ -426,7 +366,7 @@ const MatchPage = () => {
       choice_text: currentQuestion.options[choiceIndex],
     };
 
-    // Optimistic local update
+    // Optimistically update local state so answer feedback is immediate
     setAnswers(prev => [
       ...prev.filter(a => !(a.uid === currentUser.id && a.question_index === match.current_question_index)),
       newAnswer as Answer,
@@ -443,6 +383,7 @@ const MatchPage = () => {
   };
 
   const copyInviteLink = () => {
+    if (!matchId) return;
     const url = `${window.location.origin}/match/${matchId}`;
     navigator.clipboard.writeText(url);
     toast({
@@ -451,6 +392,7 @@ const MatchPage = () => {
     });
   };
 
+  // ... rest of the component remains unchanged
   if (showJoinForm) {
     return (
       <div className="min-h-screen bg-gradient-bg flex items-center justify-center p-4">
@@ -460,15 +402,15 @@ const MatchPage = () => {
               <Users className="w-6 h-6 text-neon-blue" />
               <h2 className="text-2xl font-orbitron font-bold text-foreground">Join Match</h2>
             </div>
-
+            
             <Input
               placeholder="Enter your name"
               value={playerName}
               onChange={(e) => setPlayerName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
+              onKeyPress={(e) => e.key === 'Enter' && handleJoin()}
               className="bg-input border-input-border text-foreground"
             />
-
+            
             <Button
               onClick={handleJoin}
               disabled={!playerName.trim()}
@@ -504,7 +446,7 @@ const MatchPage = () => {
               {match.quiz_name}
             </h1>
           </div>
-
+          
           <div className="flex items-center justify-center gap-4 mb-4">
             <Badge variant="secondary" className="bg-secondary text-secondary-foreground">
               {match.status.replace('_', ' ').toUpperCase()}
@@ -538,7 +480,7 @@ const MatchPage = () => {
             </div>
           )}
 
-          {showQR && (
+          {showQR && matchId && (
             <div className="mt-4 flex justify-center">
               <div className="bg-white p-4 rounded-lg">
                 <QRCodeSVG value={`${window.location.origin}/match/${matchId}`} size={128} />
@@ -564,14 +506,14 @@ const MatchPage = () => {
               <p className="text-muted-foreground">
                 {players.length === 1 ? 'Waiting for second player...' : 'Both players connected!'}
               </p>
-
+              
               <div className="space-y-4">
                 <Button
                   onClick={handleReady}
                   variant={currentPlayer.ready ? "default" : "outline"}
                   className={`w-full ${
-                    currentPlayer.ready
-                      ? 'bg-gradient-success shadow-glow-success'
+                    currentPlayer.ready 
+                      ? 'bg-gradient-success shadow-glow-success' 
                       : 'border-neon-green text-neon-green hover:bg-neon-green hover:text-primary-foreground'
                   } font-orbitron font-bold`}
                 >
@@ -607,24 +549,13 @@ const MatchPage = () => {
               phase={match.status}
             />
 
-            {match.status === 'answering' && (
-              <div className="flex justify-center gap-2 text-sm">
-                <span
-                  className={`px-2 py-1 rounded-full border ${
-                    iHaveAnswered ? 'border-neon-green text-neon-green' : 'border-muted-foreground text-muted-foreground'
-                  }`}
-                >
-                  You: {iHaveAnswered ? 'Submitted' : 'Thinking…'}
-                </span>
-                {otherPlayer && (
-                  <span
-                    className={`px-2 py-1 rounded-full border ${
-                      otherHasAnswered ? 'border-neon-blue text-neon-blue' : 'border-muted-foreground text-muted-foreground'
-                    }`}
-                  >
-                    {otherPlayer.name}: {otherHasAnswered ? 'Answered' : 'Waiting…'}
-                  </span>
-                )}
+            {match.status === 'answering' && otherPlayer && (
+              <div className="text-center text-muted-foreground">
+                {answers.some(
+                  a => a.uid === otherPlayer.uid && a.question_index === match.current_question_index
+                )
+                  ? `${otherPlayer.name} has answered`
+                  : `Waiting for ${otherPlayer.name}...`}
               </div>
             )}
 
@@ -633,13 +564,13 @@ const MatchPage = () => {
                 <h2 className="text-2xl font-orbitron font-bold text-foreground mb-8">
                   {currentQuestion.question}
                 </h2>
-
+                
                 {match.status === 'answering' && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
-                    {currentQuestion.options.map((option: string, index: number) => {
+                    {currentQuestion.options.map((option, index) => {
                       const isSelected = selectedChoice === index;
                       const isDisabled = hasAnswered;
-
+                      
                       return (
                         <Button
                           key={index}
@@ -647,8 +578,8 @@ const MatchPage = () => {
                           disabled={isDisabled}
                           variant="outline"
                           className={`h-16 text-left justify-start ${
-                            isSelected
-                              ? 'border-neon-green bg-neon-green/10 text-neon-green shadow-glow-success'
+                            isSelected 
+                              ? 'border-neon-green bg-neon-green/10 text-neon-green shadow-glow-success' 
                               : 'border-card-border hover:border-primary hover:text-primary'
                           } ${isDisabled && !isSelected ? 'opacity-50' : ''}`}
                         >
@@ -673,11 +604,11 @@ const MatchPage = () => {
                 <h2 className="text-2xl font-orbitron font-bold text-foreground">
                   {currentQuestion.question}
                 </h2>
-
+                
                 <div className="text-xl font-bold">
                   <span className="text-success">Correct Answer: {currentQuestion.correctAnswer}</span>
                 </div>
-
+                
                 {currentQuestion.explanation && (
                   <p className="text-muted-foreground max-w-2xl mx-auto">
                     {currentQuestion.explanation}
@@ -694,7 +625,9 @@ const MatchPage = () => {
                       <div
                         key={player.uid}
                         className={`p-4 rounded-lg border-2 ${
-                          isCorrect ? 'border-success bg-success/10' : 'border-danger bg-danger/10'
+                          isCorrect
+                            ? 'border-success bg-success/10'
+                            : 'border-danger bg-danger/10'
                         }`}
                       >
                         <div className="flex items-center justify-between">
@@ -722,8 +655,8 @@ const MatchPage = () => {
                   onClick={handleReady}
                   variant={currentPlayer.ready ? "default" : "outline"}
                   className={`${
-                    currentPlayer.ready
-                      ? 'bg-gradient-success shadow-glow-success'
+                    currentPlayer.ready 
+                      ? 'bg-gradient-success shadow-glow-success' 
                       : 'border-neon-green text-neon-green hover:bg-neon-green hover:text-primary-foreground'
                   } font-orbitron font-bold`}
                 >
@@ -740,24 +673,24 @@ const MatchPage = () => {
               <h2 className="text-4xl font-orbitron font-bold text-foreground">
                 Quiz Complete!
               </h2>
-
+              
               <div className="text-2xl font-bold">
-                {currentPlayer && otherPlayer && currentPlayer.score > (otherPlayer.score ?? 0) && (
+                {currentPlayer && otherPlayer && currentPlayer.score > otherPlayer.score && (
                   <span className="text-success">🏆 You Win! 🏆</span>
                 )}
-                {currentPlayer && otherPlayer && currentPlayer.score < (otherPlayer.score ?? 0) && (
+                {currentPlayer && otherPlayer && currentPlayer.score < otherPlayer.score && (
                   <span className="text-danger">You Lost!</span>
                 )}
-                {currentPlayer && otherPlayer && currentPlayer.score === (otherPlayer.score ?? 0) && (
+                {currentPlayer && otherPlayer && currentPlayer.score === otherPlayer.score && (
                   <span className="text-warning">It's a Tie!</span>
                 )}
               </div>
 
-              <ScoreBoard players={players} currentUserId={currentUser?.id} final={true} />
-
+              <ScoreBoard players={players} currentUserId={currentUser?.id} final={true} answers={[]} currentQuestionIndex={0} phase={'finished'} />
+              
               <div className="flex gap-4 justify-center">
                 <Button
-                  onClick={() => (window.location.href = '/')}
+                  onClick={() => window.location.href = '/'}
                   className="bg-gradient-primary hover:shadow-glow-primary text-primary-foreground font-orbitron font-bold"
                 >
                   New Quiz
