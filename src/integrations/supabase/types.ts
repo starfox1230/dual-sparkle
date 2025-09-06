@@ -138,6 +138,10 @@ export type Database = {
         Args: { p_match_id: string; p_qindex?: number; p_status: string }
         Returns: undefined
       }
+      update_player_scores: {
+        Args: { p_match_id: string; p_scores: Json }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
