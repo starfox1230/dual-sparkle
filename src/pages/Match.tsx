@@ -216,6 +216,7 @@ const MatchPage = () => {
       
       const currentAnswers = answers.filter(a => a.question_index === match.current_question_index);
 
+      // Update answer correctness
       for (const answer of currentAnswers) {
         const isCorrect = answer.choice_text === currentQuestion.correctAnswer;
         const points = isCorrect ? 1 : 0;
@@ -227,30 +228,32 @@ const MatchPage = () => {
           .eq('uid', answer.uid)
           .eq('question_index', match.current_question_index);
         if (ansErr) console.error('Answer update error:', ansErr);
-
-        const player = players.find(p => p.uid === answer.uid);
-        if (player) {
-          const newScore = (player.score || 0) + points;
-          console.log(`Updating score for ${player.name} (${player.uid}): ${player.score} + ${points} = ${newScore}`);
-          const { error: playerErr } = await supabase
-            .from('players')
-            .update({ score: newScore, ready: false })
-            .eq('match_id', match.id)
-            .eq('uid', answer.uid);
-          if (playerErr) console.error('Player score update error:', playerErr);
-          else console.log('Score update successful for', player.name);
-        }
       }
 
-      for (const p of players) {
-        if (!currentAnswers.some(a => a.uid === p.uid)) {
-          const { error: playerErr } = await supabase
-            .from('players')
-            .update({ ready: false })
-            .eq('match_id', match.id)
-            .eq('uid', p.uid);
-          if (playerErr) console.error('Player ready reset error:', playerErr);
-        }
+      // Use the secure function to update all player scores
+      const scoreUpdates = players.map(player => {
+        const answer = currentAnswers.find(a => a.uid === player.uid);
+        const isCorrect = answer ? answer.choice_text === currentQuestion.correctAnswer : false;
+        const points = isCorrect ? 1 : 0;
+        const newScore = (player.score || 0) + points;
+        console.log(`Score update for ${player.name}: ${player.score} + ${points} = ${newScore}`);
+        return {
+          uid: player.uid,
+          score: newScore,
+          ready: false
+        };
+      });
+
+      console.log('Calling update_player_scores with:', scoreUpdates);
+      const { error: scoreErr } = await supabase.rpc('update_player_scores', {
+        p_match_id: match.id,
+        p_scores: scoreUpdates
+      });
+      
+      if (scoreErr) {
+        console.error('Score update error:', scoreErr);
+      } else {
+        console.log('Score update successful');
       }
     } catch (error) {
       console.error('Reveal answers error:', error);
