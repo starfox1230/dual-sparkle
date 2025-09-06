@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { supabase, joinMatch, startPhase, type Match, type Player, type Answer } from '@/lib/supabase';
+import type { User } from '@supabase/supabase-js';
 import { useToast } from '@/hooks/use-toast';
 import { Timer } from '@/components/Timer';
 import { ScoreBoard } from '@/components/ScoreBoard';
@@ -16,7 +17,7 @@ const MatchPage = () => {
   const [match, setMatch] = useState<Match | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [answers, setAnswers] = useState<Answer[]>([]);
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [playerName, setPlayerName] = useState('');
   const [showJoinForm, setShowJoinForm] = useState(false);
   const [selectedChoice, setSelectedChoice] = useState<number | null>(null);
@@ -132,6 +133,16 @@ const MatchPage = () => {
       supabase.removeChannel(matchChannel);
     };
   }, [matchId, currentUser]);
+
+  useEffect(() => {
+    if (!match || !isHost || match.status !== 'question_reveal') return;
+
+    const timeout = setTimeout(() => {
+      startPhase(match.id, 'answering');
+    }, 5000);
+
+    return () => clearTimeout(timeout);
+  }, [match, isHost]);
 
   const handleJoin = async () => {
     if (!playerName.trim() || !matchId) return;
@@ -355,9 +366,9 @@ const MatchPage = () => {
 
         {(match.status === 'question_reveal' || match.status === 'answering') && currentQuestion && (
           <div className="space-y-6">
-            <Timer 
-              phaseStart={match.phase_start} 
-              timerSeconds={match.timer_seconds}
+            <Timer
+              phaseStart={match.phase_start}
+              timerSeconds={match.status === 'question_reveal' ? 5 : match.timer_seconds}
               phase={match.status}
             />
             
