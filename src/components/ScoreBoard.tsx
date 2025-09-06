@@ -1,15 +1,25 @@
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Crown, User, Check, Clock } from 'lucide-react';
-import type { Player } from '@/lib/supabase';
+import type { Player, Answer } from '@/lib/supabase';
 
 interface ScoreBoardProps {
   players: Player[];
   currentUserId?: string;
   final?: boolean;
+  phase?: string;
+  answers?: Answer[];
+  currentQuestionIndex?: number;
 }
 
-export const ScoreBoard = ({ players, currentUserId, final = false }: ScoreBoardProps) => {
+export const ScoreBoard = ({
+  players,
+  currentUserId,
+  final = false,
+  phase,
+  answers = [],
+  currentQuestionIndex,
+}: ScoreBoardProps) => {
   if (players.length === 0) return null;
 
   const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
@@ -17,16 +27,21 @@ export const ScoreBoard = ({ players, currentUserId, final = false }: ScoreBoard
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-      {players.map((player, index) => {
+      {players.map((player) => {
         const isCurrentUser = player.uid === currentUserId;
         const winner = isWinner(player);
         
+        const hasAnswered = answers.some(
+          (a) =>
+            a.uid === player.uid && a.question_index === currentQuestionIndex
+        );
+
         return (
-          <Card 
+          <Card
             key={player.uid}
             className={`p-4 border-2 transition-all duration-300 ${
-              isCurrentUser 
-                ? 'border-primary shadow-glow-primary bg-primary/5' 
+              isCurrentUser
+                ? 'border-primary shadow-glow-primary bg-primary/5'
                 : 'border-card-border bg-card'
             } ${winner ? 'shadow-glow-success' : ''}`}
           >
@@ -53,15 +68,29 @@ export const ScoreBoard = ({ players, currentUserId, final = false }: ScoreBoard
                   </div>
                 </div>
               </div>
-              
+
               <div className="text-right">
-                <div className={`text-2xl font-orbitron font-bold ${
-                  winner ? 'text-success' : 'text-foreground'
-                }`}>
+                <div
+                  className={`text-2xl font-orbitron font-bold ${
+                    winner ? 'text-success' : 'text-foreground'
+                  }`}
+                >
                   {player.score}
                 </div>
                 <div className="flex items-center gap-1 text-xs">
-                  {player.ready ? (
+                  {phase === 'answering' ? (
+                    hasAnswered ? (
+                      <div className="flex items-center gap-1 text-success">
+                        <Check className="w-3 h-3" />
+                        Answered
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1 text-muted-foreground">
+                        <Clock className="w-3 h-3" />
+                        Waiting
+                      </div>
+                    )
+                  ) : player.ready ? (
                     <div className="flex items-center gap-1 text-success">
                       <Check className="w-3 h-3" />
                       Ready
