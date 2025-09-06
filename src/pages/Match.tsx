@@ -168,23 +168,24 @@ const MatchPage = () => {
     }
   }, [match?.current_question_index, match?.status]);
 
-  // Ensure ready state resets immediately when entering round end
+  // Reset ready state when entering round end
   useEffect(() => {
     if (match?.status === 'round_end') {
-      // Reset ready state in database for all players immediately
+      // Reset ready state in database for all players
       const resetReadyStates = async () => {
-        for (const player of players) {
-          await supabase
-            .from('players')
-            .update({ ready: false })
-            .eq('match_id', match.id)
-            .eq('uid', player.uid);
+        if (players.length > 0) {
+          for (const player of players) {
+            await supabase
+              .from('players')
+              .update({ ready: false })
+              .eq('match_id', match.id)
+              .eq('uid', player.uid);
+          }
         }
       };
       resetReadyStates();
-      setPlayers(prev => prev.map(p => ({ ...p, ready: false })));
     }
-  }, [match?.status, match?.id, players]);
+  }, [match?.status, match?.id]);
 
   const revealAnswers = useCallback(async () => {
     if (!match || !currentQuestion) return;
@@ -263,13 +264,13 @@ const MatchPage = () => {
 
     if (roundProcessed) return;
     
-    // Check if all players have answered
+    // Check if all players have answered (for any number of players >= 2)
     const currentAnswers = answers.filter(
       a => a.question_index === match.current_question_index
     );
-    const allAnswered = currentAnswers.length === players.length && players.length === 2;
+    const allAnswered = players.length >= 2 && currentAnswers.length === players.length;
 
-    // Immediately proceed to round end when both players have answered
+    // Immediately proceed to round end when all players have answered
     if (allAnswered) {
       setRoundProcessed(true);
       revealAnswers();
