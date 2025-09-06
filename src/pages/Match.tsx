@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,8 @@ const MatchPage = () => {
   const [showJoinForm, setShowJoinForm] = useState(false);
   const [selectedChoice, setSelectedChoice] = useState<number | null>(null);
   const [showQR, setShowQR] = useState(false);
+  const [roundProcessed, setRoundProcessed] = useState(false);
+  const [nextQuestionTriggered, setNextQuestionTriggered] = useState(false);
   const { toast } = useToast();
 
   const currentQuestion = match?.quiz.questions[match.current_question_index];
@@ -144,6 +146,60 @@ const MatchPage = () => {
     return () => clearTimeout(timeout);
   }, [match, isHost]);
 
+  useEffect(() => {
+    setSelectedChoice(null);
+  }, [match?.current_question_index]);
+
+  useEffect(() => {
+    if (!match || !isHost) return;
+
+    if (match.status !== 'answering') {
+      setRoundProcessed(false);
+      return;
+    }
+
+    if (roundProcessed) return;
+
+    const allAnswered = answers.length === players.length && players.length > 0;
+
+    if (allAnswered) {
+      setRoundProcessed(true);
+      revealAnswers();
+      return;
+    }
+
+    const now = Date.now();
+    const start = new Date(match.phase_start).getTime();
+    const remaining = match.timer_seconds * 1000 - (now - start);
+    const timeout = setTimeout(() => {
+      setRoundProcessed(true);
+      revealAnswers();
+    }, Math.max(0, remaining));
+
+    return () => clearTimeout(timeout);
+  }, [match, answers, players, isHost, roundProcessed, revealAnswers]);
+
+  useEffect(() => {
+    if (!match || !isHost) return;
+
+    if (match.status !== 'round_end') {
+      setNextQuestionTriggered(false);
+      return;
+    }
+
+    if (nextQuestionTriggered) return;
+
+    if (players.length > 0 && players.every(p => p.ready)) {
+      setNextQuestionTriggered(true);
+      const nextIndex = match.current_question_index + 1;
+      if (nextIndex < match.quiz.questions.length) {
+        startPhase(match.id, 'question_reveal', nextIndex);
+      } else {
+        startPhase(match.id, 'finished');
+      }
+    }
+  }, [match, players, isHost, nextQuestionTriggered]);
+
   const handleJoin = async () => {
     if (!playerName.trim() || !matchId) return;
 
@@ -191,6 +247,48 @@ const MatchPage = () => {
       console.error('Start error:', error);
     }
   };
+
+  const revealAnswers = useCallback(async () => {
+    if (!match || !currentQuestion) return;
+
+    try {
+      await startPhase(match.id, 'round_end');
+
+      for (const answer of answers) {
+        const isCorrect = answer.choice_text === currentQuestion.correctAnswer;
+        const points = isCorrect ? 1 : 0;
+
+        const { error: ansErr } = await supabase
+          .from('answers')
+          .update({ is_correct: isCorrect, points })
+          .eq('match_id', match.id)
+          .eq('uid', answer.uid)
+          .eq('question_index', match.current_question_index);
+        if (ansErr) console.error('Answer update error:', ansErr);
+
+        const player = players.find(p => p.uid === answer.uid);
+        const { error: playerErr } = await supabase
+          .from('players')
+          .update({ score: (player?.score || 0) + points, ready: false })
+          .eq('match_id', match.id)
+          .eq('uid', answer.uid);
+        if (playerErr) console.error('Player score update error:', playerErr);
+      }
+
+      for (const p of players) {
+        if (!answers.some(a => a.uid === p.uid)) {
+          const { error: playerErr } = await supabase
+            .from('players')
+            .update({ ready: false })
+            .eq('match_id', match.id)
+            .eq('uid', p.uid);
+          if (playerErr) console.error('Player ready reset error:', playerErr);
+        }
+      }
+    } catch (error) {
+      console.error('Reveal answers error:', error);
+    }
+  }, [match, currentQuestion, answers, players]);
 
   const handleAnswer = async (choiceIndex: number) => {
     if (!currentUser || !match || !currentQuestion || hasAnswered) return;
@@ -319,7 +417,13 @@ const MatchPage = () => {
         </div>
 
         {/* Players & Score */}
-        <ScoreBoard players={players} currentUserId={currentUser?.id} />
+        <ScoreBoard
+          players={players}
+          currentUserId={currentUser?.id}
+          answers={answers}
+          currentQuestionIndex={match.current_question_index}
+          phase={match.status}
+        />
 
         {/* Game Content */}
         {match.status === 'lobby' && (
@@ -429,21 +533,21 @@ const MatchPage = () => {
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
-                  {answers.map((answer) => {
-                    const player = players.find(p => p.uid === answer.uid);
-                    const isCorrect = answer.is_correct;
-                    
+                  {players.map((player) => {
+                    const answer = answers.find(a => a.uid === player.uid);
+                    const isCorrect = answer?.is_correct;
+
                     return (
                       <div
-                        key={answer.uid}
+                        key={player.uid}
                         className={`p-4 rounded-lg border-2 ${
-                          isCorrect 
-                            ? 'border-success bg-success/10' 
+                          isCorrect
+                            ? 'border-success bg-success/10'
                             : 'border-danger bg-danger/10'
                         }`}
                       >
                         <div className="flex items-center justify-between">
-                          <span className="font-semibold">{player?.name}</span>
+                          <span className="font-semibold">{player.name}</span>
                           {isCorrect ? (
                             <Check className="w-5 h-5 text-success" />
                           ) : (
@@ -451,9 +555,9 @@ const MatchPage = () => {
                           )}
                         </div>
                         <div className="text-sm text-muted-foreground">
-                          {answer.choice_text}
+                          {answer ? answer.choice_text : 'No answer'}
                         </div>
-                        {answer.points !== undefined && (
+                        {answer?.points !== undefined && (
                           <div className="text-lg font-bold text-foreground">
                             +{answer.points} points
                           </div>
