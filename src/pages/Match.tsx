@@ -290,6 +290,48 @@ const MatchPage = () => {
     }
   };
 
+  const revealAnswers = useCallback(async () => {
+    if (!match || !currentQuestion) return;
+
+    try {
+      await startPhase(match.id, 'round_end');
+
+      for (const answer of answers) {
+        const isCorrect = answer.choice_text === currentQuestion.correctAnswer;
+        const points = isCorrect ? 1 : 0;
+
+        const { error: ansErr } = await supabase
+          .from('answers')
+          .update({ is_correct: isCorrect, points })
+          .eq('match_id', match.id)
+          .eq('uid', answer.uid)
+          .eq('question_index', match.current_question_index);
+        if (ansErr) console.error('Answer update error:', ansErr);
+
+        const player = players.find(p => p.uid === answer.uid);
+        const { error: playerErr } = await supabase
+          .from('players')
+          .update({ score: (player?.score || 0) + points, ready: false })
+          .eq('match_id', match.id)
+          .eq('uid', answer.uid);
+        if (playerErr) console.error('Player score update error:', playerErr);
+      }
+
+      for (const p of players) {
+        if (!answers.some(a => a.uid === p.uid)) {
+          const { error: playerErr } = await supabase
+            .from('players')
+            .update({ ready: false })
+            .eq('match_id', match.id)
+            .eq('uid', p.uid);
+          if (playerErr) console.error('Player ready reset error:', playerErr);
+        }
+      }
+    } catch (error) {
+      console.error('Reveal answers error:', error);
+    }
+  }, [match, currentQuestion, answers, players]);
+
   const handleAnswer = async (choiceIndex: number) => {
     if (!currentUser || !match || !currentQuestion || hasAnswered) return;
 
