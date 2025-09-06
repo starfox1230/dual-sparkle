@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,6 +25,7 @@ const MatchPage = () => {
   const [roundProcessed, setRoundProcessed] = useState(false);
   const [nextQuestionTriggered, setNextQuestionTriggered] = useState(false);
   const { toast } = useToast();
+  const currentQuestionRef = useRef<number>(0);
 
   const currentQuestion = match?.quiz.questions[match.current_question_index];
   const isHost = currentUser && match && currentUser.id === match.host_uid;
@@ -129,6 +130,7 @@ const MatchPage = () => {
       }, (payload) => {
         if (payload.new) {
           const newAnswer = payload.new as Answer;
+          if (newAnswer.question_index !== currentQuestionRef.current) return;
           setAnswers(prev => [
             ...prev.filter(a => !(a.uid === newAnswer.uid && a.question_index === newAnswer.question_index)),
             newAnswer,
@@ -154,6 +156,10 @@ const MatchPage = () => {
 
   useEffect(() => {
     setSelectedChoice(null);
+  }, [match?.current_question_index]);
+
+  useEffect(() => {
+    currentQuestionRef.current = match?.current_question_index ?? 0;
   }, [match?.current_question_index]);
 
   // Clear answers when a new question is revealed to avoid using stale data
@@ -242,7 +248,10 @@ const MatchPage = () => {
 
     if (roundProcessed) return;
 
-    const allAnswered = answers.length === players.length && players.length > 0;
+    const currentAnswers = answers.filter(
+      a => a.question_index === match.current_question_index
+    );
+    const allAnswered = currentAnswers.length === players.length && players.length > 0;
 
     if (allAnswered) {
       setRoundProcessed(true);
