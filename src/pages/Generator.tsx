@@ -83,7 +83,7 @@ const Generator = () => {
     quizName: "Space Knowledge Quiz",
     questions: [
       {
-        question: "What is the closest planet to the Sun?",
+        question: "What is the actual closest planet to the Sun?",
         options: ["Venus", "Mercury", "Earth", "Mars"],
         correctAnswer: "Mercury",
         explanation: "Mercury is the innermost planet in our solar system."
