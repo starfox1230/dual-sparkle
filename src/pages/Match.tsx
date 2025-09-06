@@ -264,11 +264,11 @@ const MatchPage = () => {
 
     if (roundProcessed) return;
     
-    // Check if all players have answered (for any number of players >= 2)
+    // Check if all players have answered
     const currentAnswers = answers.filter(
       a => a.question_index === match.current_question_index
     );
-    const allAnswered = players.length >= 2 && currentAnswers.length === players.length;
+    const allAnswered = players.length > 0 && currentAnswers.length === players.length;
 
     // Immediately proceed to round end when all players have answered
     if (allAnswered) {
@@ -700,7 +700,7 @@ const MatchPage = () => {
                 )}
               </div>
 
-              <ScoreBoard players={players} currentUserId={currentUser?.id} final={true} answers={[]} currentQuestionIndex={0} phase={'finished'} />
+              <ScoreBoard players={players} currentUserId={currentUser?.id} final={true} answers={answers} currentQuestionIndex={match.current_question_index} phase={'finished'} />
               
               <div className="flex gap-4 justify-center">
                 <Button
