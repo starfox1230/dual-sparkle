@@ -63,20 +63,35 @@ export interface Answer {
 
 // Auth helper functions
 export async function ensureAuth(): Promise<any> {
-  let { data: { session } } = await supabase.auth.getSession();
-  
-  if (!session) {
-    // Try anonymous auth first
-    const { data, error } = await supabase.auth.signInAnonymously();
-    if (error) {
-      console.warn('Anonymous auth not available, using magic link fallback');
-      // Could implement magic link fallback here if needed
-      throw new Error('Authentication required');
+  try {
+    let { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      console.log('No session found, attempting anonymous auth...');
+      // Try anonymous auth first
+      const { data, error } = await supabase.auth.signInAnonymously();
+      if (error) {
+        console.error('Anonymous auth failed:', error);
+        throw new Error(`Authentication failed: ${error.message}`);
+      }
+      console.log('Anonymous auth successful');
     }
+    
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError) {
+      console.error('Failed to get user:', userError);
+      throw new Error(`Failed to get user: ${userError.message}`);
+    }
+    
+    if (!user) {
+      throw new Error('No user found after authentication');
+    }
+    
+    return user;
+  } catch (error) {
+    console.error('ensureAuth error:', error);
+    throw error;
   }
-  
-  const { data: { user } } = await supabase.auth.getUser();
-  return user;
 }
 
 // Match management functions
