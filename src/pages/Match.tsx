@@ -154,6 +154,23 @@ const MatchPage = () => {
     if (!match || !currentQuestion) return;
 
     try {
+      // Update local state so the round end screen persists until players confirm
+      setPlayers(prev =>
+        prev.map(p => {
+          const answer = answers.find(a => a.uid === p.uid);
+          const isCorrect = answer ? answer.choice_text === currentQuestion.correctAnswer : false;
+          const points = isCorrect ? 1 : 0;
+          return { ...p, score: (p.score || 0) + points, ready: false };
+        })
+      );
+      setAnswers(prev =>
+        prev.map(a => {
+          const isCorrect = a.choice_text === currentQuestion.correctAnswer;
+          const points = isCorrect ? 1 : 0;
+          return { ...a, is_correct: isCorrect, points };
+        })
+      );
+
       await startPhase(match.id, 'round_end');
 
       for (const answer of answers) {
@@ -535,7 +552,8 @@ const MatchPage = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
                   {players.map((player) => {
                     const answer = answers.find(a => a.uid === player.uid);
-                    const isCorrect = answer?.is_correct;
+                    const isCorrect = answer ? answer.choice_text === currentQuestion.correctAnswer : false;
+                    const points = isCorrect ? 1 : 0;
 
                     return (
                       <div
@@ -557,9 +575,9 @@ const MatchPage = () => {
                         <div className="text-sm text-muted-foreground">
                           {answer ? answer.choice_text : 'No answer'}
                         </div>
-                        {answer?.points !== undefined && (
+                        {answer && (
                           <div className="text-lg font-bold text-foreground">
-                            +{answer.points} points
+                            +{points} points
                           </div>
                         )}
                       </div>
