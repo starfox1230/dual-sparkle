@@ -171,9 +171,20 @@ const MatchPage = () => {
   // Ensure ready state resets immediately when entering round end
   useEffect(() => {
     if (match?.status === 'round_end') {
+      // Reset ready state in database for all players immediately
+      const resetReadyStates = async () => {
+        for (const player of players) {
+          await supabase
+            .from('players')
+            .update({ ready: false })
+            .eq('match_id', match.id)
+            .eq('uid', player.uid);
+        }
+      };
+      resetReadyStates();
       setPlayers(prev => prev.map(p => ({ ...p, ready: false })));
     }
-  }, [match?.status]);
+  }, [match?.status, match?.id, players]);
 
   const revealAnswers = useCallback(async () => {
     if (!match || !currentQuestion) return;
@@ -252,12 +263,13 @@ const MatchPage = () => {
 
     if (roundProcessed) return;
     
-    // FIX: This logic will now work correctly because the `answers` state is properly synced.
+    // Check if all players have answered
     const currentAnswers = answers.filter(
       a => a.question_index === match.current_question_index
     );
-    const allAnswered = currentAnswers.length === players.length && players.length > 0;
+    const allAnswered = currentAnswers.length === players.length && players.length === 2;
 
+    // Immediately proceed to round end when both players have answered
     if (allAnswered) {
       setRoundProcessed(true);
       revealAnswers();
@@ -358,12 +370,13 @@ const MatchPage = () => {
 
     setSelectedChoice(choiceIndex);
 
-     const newAnswer: Omit<Answer, 'id' | 'created_at' | 'is_correct' | 'points'> = {
+     const newAnswer: Omit<Answer, 'is_correct' | 'points'> = {
       match_id: match.id,
       uid: currentUser.id,
       question_index: match.current_question_index,
       choice_index: choiceIndex,
       choice_text: currentQuestion.options[choiceIndex],
+      submitted_at: new Date().toISOString(),
     };
 
     // Optimistically update local state so answer feedback is immediate
