@@ -113,21 +113,27 @@ const MatchPage = () => {
           setMatch(payload.new as Match);
         }
       })
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'players', 
-        filter: `match_id=eq.${matchId}` 
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'players',
+        filter: `match_id=eq.${matchId}`
       }, () => {
         fetchData();
       })
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'answers', 
-        filter: `match_id=eq.${matchId}` 
-      }, () => {
-        fetchData();
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'answers',
+        filter: `match_id=eq.${matchId}`
+      }, (payload) => {
+        if (payload.new) {
+          const newAnswer = payload.new as Answer;
+          setAnswers(prev => [
+            ...prev.filter(a => !(a.uid === newAnswer.uid && a.question_index === newAnswer.question_index)),
+            newAnswer,
+          ]);
+        }
       })
       .subscribe();
 
@@ -156,6 +162,13 @@ const MatchPage = () => {
       setAnswers([]);
     }
   }, [match?.current_question_index, match?.status]);
+
+  // Ensure ready state resets immediately when entering round end
+  useEffect(() => {
+    if (match?.status === 'round_end') {
+      setPlayers(prev => prev.map(p => ({ ...p, ready: false })));
+    }
+  }, [match?.status]);
 
   const revealAnswers = useCallback(async () => {
     if (!match || !currentQuestion) return;
