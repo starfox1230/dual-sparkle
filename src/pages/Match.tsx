@@ -150,6 +150,13 @@ const MatchPage = () => {
     setSelectedChoice(null);
   }, [match?.current_question_index]);
 
+  // Clear answers when a new question is revealed to avoid using stale data
+  useEffect(() => {
+    if (match?.status === 'question_reveal') {
+      setAnswers([]);
+    }
+  }, [match?.current_question_index, match?.status]);
+
   const revealAnswers = useCallback(async () => {
     if (!match || !currentQuestion) return;
 
@@ -170,6 +177,9 @@ const MatchPage = () => {
           return { ...a, is_correct: isCorrect, points };
         })
       );
+
+      // Optimistically update match status so the timer stops immediately
+      setMatch(prev => prev ? { ...prev, status: 'round_end', phase_start: new Date().toISOString() } : prev);
 
       await startPhase(match.id, 'round_end');
 
@@ -312,15 +322,23 @@ const MatchPage = () => {
 
     setSelectedChoice(choiceIndex);
 
+     const newAnswer = {
+      match_id: match.id,
+      uid: currentUser.id,
+      question_index: match.current_question_index,
+      choice_index: choiceIndex,
+      choice_text: currentQuestion.options[choiceIndex],
+    };
+
+    // Optimistically update local state so answer feedback is immediate
+    setAnswers(prev => [
+      ...prev.filter(a => !(a.uid === currentUser.id && a.question_index === match.current_question_index)),
+      newAnswer,
+    ]);
+
     const { error } = await supabase
       .from('answers')
-      .upsert({
-        match_id: match.id,
-        uid: currentUser.id,
-        question_index: match.current_question_index,
-        choice_index: choiceIndex,
-        choice_text: currentQuestion.options[choiceIndex],
-      });
+      .upsert(newAnswer);
 
     if (error) {
       console.error('Answer error:', error);
@@ -492,7 +510,17 @@ const MatchPage = () => {
               timerSeconds={match.status === 'question_reveal' ? 5 : match.timer_seconds}
               phase={match.status}
             />
-            
+
+            {match.status === 'answering' && otherPlayer && (
+              <div className="text-center text-muted-foreground">
+                {answers.some(
+                  a => a.uid === otherPlayer.uid && a.question_index === match.current_question_index
+                )
+                  ? `${otherPlayer.name} has answered`
+                  : `Waiting for ${otherPlayer.name}...`}
+              </div>
+            )}
+
             <Card className="bg-card border-card-border border-2 shadow-glow-primary">
               <div className="p-8 text-center">
                 <h2 className="text-2xl font-orbitron font-bold text-foreground mb-8">
