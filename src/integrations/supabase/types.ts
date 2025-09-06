@@ -14,13 +14,130 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      answers: {
+        Row: {
+          choice_index: number
+          choice_text: string
+          is_correct: boolean | null
+          match_id: string
+          points: number | null
+          question_index: number
+          submitted_at: string
+          uid: string
+        }
+        Insert: {
+          choice_index: number
+          choice_text: string
+          is_correct?: boolean | null
+          match_id: string
+          points?: number | null
+          question_index: number
+          submitted_at?: string
+          uid: string
+        }
+        Update: {
+          choice_index?: number
+          choice_text?: string
+          is_correct?: boolean | null
+          match_id?: string
+          points?: number | null
+          question_index?: number
+          submitted_at?: string
+          uid?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "answers_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      matches: {
+        Row: {
+          created_at: string
+          current_question_index: number
+          host_uid: string
+          id: string
+          is_public: boolean
+          phase_start: string
+          quiz: Json
+          quiz_name: string
+          status: string
+          timer_seconds: number
+        }
+        Insert: {
+          created_at?: string
+          current_question_index?: number
+          host_uid: string
+          id?: string
+          is_public?: boolean
+          phase_start?: string
+          quiz: Json
+          quiz_name: string
+          status?: string
+          timer_seconds?: number
+        }
+        Update: {
+          created_at?: string
+          current_question_index?: number
+          host_uid?: string
+          id?: string
+          is_public?: boolean
+          phase_start?: string
+          quiz?: Json
+          quiz_name?: string
+          status?: string
+          timer_seconds?: number
+        }
+        Relationships: []
+      }
+      players: {
+        Row: {
+          joined_at: string
+          match_id: string
+          name: string
+          ready: boolean
+          score: number
+          uid: string
+        }
+        Insert: {
+          joined_at?: string
+          match_id: string
+          name: string
+          ready?: boolean
+          score?: number
+          uid: string
+        }
+        Update: {
+          joined_at?: string
+          match_id?: string
+          name?: string
+          ready?: boolean
+          score?: number
+          uid?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "players_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      start_phase: {
+        Args: { p_match_id: string; p_qindex?: number; p_status: string }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
