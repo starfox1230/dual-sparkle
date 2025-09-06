@@ -215,12 +215,14 @@ const MatchPage = () => {
       await startPhase(match.id, 'round_end');
       
       const currentAnswers = answers.filter(a => a.question_index === match.current_question_index);
+      console.log('Processing answers for scoring:', currentAnswers);
 
-      // Update answer correctness
+      // Update answer correctness and scores individually
       for (const answer of currentAnswers) {
         const isCorrect = answer.choice_text === currentQuestion.correctAnswer;
         const points = isCorrect ? 1 : 0;
 
+        // Update the answer with correctness info
         const { error: ansErr } = await supabase
           .from('answers')
           .update({ is_correct: isCorrect, points })
@@ -228,32 +230,48 @@ const MatchPage = () => {
           .eq('uid', answer.uid)
           .eq('question_index', match.current_question_index);
         if (ansErr) console.error('Answer update error:', ansErr);
+
+        // Find the player and update their score
+        const player = players.find(p => p.uid === answer.uid);
+        if (player) {
+          const newScore = (player.score || 0) + points;
+          console.log(`Updating score for ${player.name}: ${player.score} + ${points} = ${newScore}`);
+          
+          // Update player score directly (this will work for the current user due to RLS)
+          const { error: playerErr } = await supabase
+            .from('players')
+            .update({ score: newScore, ready: false })
+            .eq('match_id', match.id)
+            .eq('uid', answer.uid);
+          
+          if (playerErr) {
+            console.error('Player score update error:', playerErr);
+            // If direct update fails (due to RLS), try the function approach for host
+            if (isHost) {
+              console.log('Trying function approach for host...');
+              const { error: funcErr } = await supabase.rpc('update_player_scores', {
+                p_match_id: match.id,
+                p_scores: [{ uid: player.uid, score: newScore, ready: false }]
+              });
+              if (funcErr) console.error('Function update error:', funcErr);
+            }
+          } else {
+            console.log('Score update successful for', player.name);
+          }
+        }
       }
 
-      // Use the secure function to update all player scores
-      const scoreUpdates = players.map(player => {
-        const answer = currentAnswers.find(a => a.uid === player.uid);
-        const isCorrect = answer ? answer.choice_text === currentQuestion.correctAnswer : false;
-        const points = isCorrect ? 1 : 0;
-        const newScore = (player.score || 0) + points;
-        console.log(`Score update for ${player.name}: ${player.score} + ${points} = ${newScore}`);
-        return {
-          uid: player.uid,
-          score: newScore,
-          ready: false
-        };
-      });
-
-      console.log('Calling update_player_scores with:', scoreUpdates);
-      const { error: scoreErr } = await supabase.rpc('update_player_scores', {
-        p_match_id: match.id,
-        p_scores: scoreUpdates
-      });
-      
-      if (scoreErr) {
-        console.error('Score update error:', scoreErr);
-      } else {
-        console.log('Score update successful');
+      // Reset ready state for players who didn't answer
+      for (const player of players) {
+        if (!currentAnswers.some(a => a.uid === player.uid)) {
+          console.log(`Resetting ready state for ${player.name} (no answer)`);
+          const { error: readyErr } = await supabase
+            .from('players')
+            .update({ ready: false })
+            .eq('match_id', match.id)
+            .eq('uid', player.uid);
+          if (readyErr) console.error('Ready reset error:', readyErr);
+        }
       }
     } catch (error) {
       console.error('Reveal answers error:', error);
