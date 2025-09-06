@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,7 +25,6 @@ const MatchPage = () => {
   const [roundProcessed, setRoundProcessed] = useState(false);
   const [nextQuestionTriggered, setNextQuestionTriggered] = useState(false);
   const { toast } = useToast();
-  // The currentQuestionRef was causing a stale closure issue in the subscription. It has been removed.
 
   const currentQuestion = match?.quiz.questions[match.current_question_index];
   const isHost = currentUser && match && currentUser.id === match.host_uid;
@@ -54,54 +53,40 @@ const MatchPage = () => {
     initAuth();
   }, [matchId]);
 
+  const fetchData = useCallback(async () => {
+    if (!matchId || !currentUser) return;
+
+    const [matchResult, playersResult, answersResult] = await Promise.all([
+      supabase.from('matches').select('*').eq('id', matchId).single(),
+      supabase.from('players').select('*').eq('match_id', matchId),
+      supabase.from('answers').select('*').eq('match_id', matchId)
+    ]);
+
+    const { data: matchData } = matchResult;
+    if (matchData) {
+      setMatch(matchData);
+    }
+
+    const { data: playersData } = playersResult;
+    if (playersData) {
+      setPlayers(playersData);
+      const isPlayerInMatch = playersData.some(p => p.uid === currentUser.id);
+      if (!isPlayerInMatch && playersData.length < 2) {
+        setShowJoinForm(true);
+      }
+    }
+    
+    const { data: answersData } = answersResult;
+    if (answersData) {
+      setAnswers(answersData);
+    }
+  }, [matchId, currentUser]);
+
   useEffect(() => {
     if (!matchId || !currentUser) return;
 
-    const fetchData = async () => {
-      // Fetch match
-      const { data: matchData } = await supabase
-        .from('matches')
-        .select('*')
-        .eq('id', matchId)
-        .single();
-
-      if (matchData) {
-        setMatch(matchData);
-      }
-
-      // Fetch players
-      const { data: playersData } = await supabase
-        .from('players')
-        .select('*')
-        .eq('match_id', matchId);
-
-      if (playersData) {
-        setPlayers(playersData);
-        
-        // Check if current user needs to join
-        const isPlayerInMatch = playersData.some(p => p.uid === currentUser.id);
-        if (!isPlayerInMatch && playersData.length < 2) {
-          setShowJoinForm(true);
-        }
-      }
-
-      // Fetch answers for current question
-      if (matchData) {
-        const { data: answersData } = await supabase
-          .from('answers')
-          .select('*')
-          .eq('match_id', matchId)
-          .eq('question_index', matchData.current_question_index);
-
-        if (answersData) {
-          setAnswers(answersData);
-        }
-      }
-    };
-
     fetchData();
 
-    // Set up realtime subscriptions
     const matchChannel = supabase
       .channel(`match:${matchId}`)
       .on('postgres_changes', { 
@@ -127,25 +112,15 @@ const MatchPage = () => {
         schema: 'public',
         table: 'answers',
         filter: `match_id=eq.${matchId}`
-      }, (payload) => {
-        if (payload.new) {
-          const newAnswer = payload.new as Answer;
-          // FIX: Removed the check against a stale currentQuestionRef.
-          // The `answers` state is cleared for each new question, and components
-          // filter by the current question index, making this safe.
-          // This ensures all clients receive answer updates in real-time.
-          setAnswers(prev => [
-            ...prev.filter(a => !(a.uid === newAnswer.uid && a.question_index === newAnswer.question_index)),
-            newAnswer,
-          ]);
-        }
+      }, () => {
+        fetchData();
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(matchChannel);
     };
-  }, [matchId, currentUser]);
+  }, [matchId, currentUser, fetchData]);
 
   useEffect(() => {
     if (!match || !isHost || match.status !== 'question_reveal') return;
@@ -161,47 +136,13 @@ const MatchPage = () => {
     setSelectedChoice(null);
   }, [match?.current_question_index]);
 
-  // Clear answers when a new question is revealed to avoid using stale data
-  useEffect(() => {
-    if (match?.status === 'question_reveal') {
-      setAnswers([]);
-    }
-  }, [match?.current_question_index, match?.status]);
-
-  // Ensure ready state resets immediately when entering round end
-  useEffect(() => {
-    if (match?.status === 'round_end') {
-      setPlayers(prev => prev.map(p => ({ ...p, ready: false })));
-    }
-  }, [match?.status]);
-
   const revealAnswers = useCallback(async () => {
     if (!match || !currentQuestion) return;
 
     try {
-      // Update local state so the round end screen persists until players confirm
-      setPlayers(prev =>
-        prev.map(p => {
-          const answer = answers.find(a => a.uid === p.uid && a.question_index === match.current_question_index);
-          const isCorrect = answer ? answer.choice_text === currentQuestion.correctAnswer : false;
-          const points = isCorrect ? 1 : 0;
-          return { ...p, score: (p.score || 0) + points, ready: false };
-        })
-      );
-      setAnswers(prev =>
-        prev.map(a => {
-          if (a.question_index !== match.current_question_index) return a;
-          const isCorrect = a.choice_text === currentQuestion.correctAnswer;
-          const points = isCorrect ? 1 : 0;
-          return { ...a, is_correct: isCorrect, points };
-        })
-      );
-
-      // Optimistically update match status so the timer stops immediately
       setMatch(prev => prev ? { ...prev, status: 'round_end', phase_start: new Date().toISOString() } : prev);
-
       await startPhase(match.id, 'round_end');
-      
+
       const currentAnswers = answers.filter(a => a.question_index === match.current_question_index);
 
       for (const answer of currentAnswers) {
@@ -251,12 +192,11 @@ const MatchPage = () => {
     }
 
     if (roundProcessed) return;
-    
-    // FIX: This logic will now work correctly because the `answers` state is properly synced.
+
     const currentAnswers = answers.filter(
       a => a.question_index === match.current_question_index
     );
-    const allAnswered = currentAnswers.length === players.length && players.length > 0;
+    const allAnswered = currentAnswers.length === players.length && players.length >= 2;
 
     if (allAnswered) {
       setRoundProcessed(true);
@@ -268,18 +208,18 @@ const MatchPage = () => {
     const start = new Date(match.phase_start).getTime();
     const remaining = match.timer_seconds * 1000 - (now - start);
     
-    if (remaining <= 0) {
+    if (remaining <= 0 && !roundProcessed) {
+        setRoundProcessed(true);
+        revealAnswers();
+        return;
+    }
+
+    const timeout = setTimeout(() => {
       if (!roundProcessed) {
         setRoundProcessed(true);
         revealAnswers();
       }
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      setRoundProcessed(true);
-      revealAnswers();
-    }, remaining);
+    }, Math.max(0, remaining));
 
     return () => clearTimeout(timeout);
   }, [match, answers, players, isHost, roundProcessed, revealAnswers]);
@@ -358,19 +298,13 @@ const MatchPage = () => {
 
     setSelectedChoice(choiceIndex);
 
-     const newAnswer: Omit<Answer, 'id' | 'created_at' | 'is_correct' | 'points'> = {
+     const newAnswer = {
       match_id: match.id,
       uid: currentUser.id,
       question_index: match.current_question_index,
       choice_index: choiceIndex,
       choice_text: currentQuestion.options[choiceIndex],
     };
-
-    // Optimistically update local state so answer feedback is immediate
-    setAnswers(prev => [
-      ...prev.filter(a => !(a.uid === currentUser.id && a.question_index === match.current_question_index)),
-      newAnswer as Answer,
-    ]);
 
     const { error } = await supabase
       .from('answers')
@@ -392,7 +326,6 @@ const MatchPage = () => {
     });
   };
 
-  // ... rest of the component remains unchanged
   if (showJoinForm) {
     return (
       <div className="min-h-screen bg-gradient-bg flex items-center justify-center p-4">
