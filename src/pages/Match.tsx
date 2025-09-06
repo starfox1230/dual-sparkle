@@ -128,16 +128,16 @@ const MatchPage = () => {
         table: 'answers',
         filter: `match_id=eq.${matchId}`
       }, (payload) => {
+        console.log('Real-time answer update:', payload);
         if (payload.new) {
           const newAnswer = payload.new as Answer;
-          // FIX: Removed the check against a stale currentQuestionRef.
-          // The `answers` state is cleared for each new question, and components
-          // filter by the current question index, making this safe.
-          // This ensures all clients receive answer updates in real-time.
-          setAnswers(prev => [
-            ...prev.filter(a => !(a.uid === newAnswer.uid && a.question_index === newAnswer.question_index)),
-            newAnswer,
-          ]);
+          console.log('Adding answer to state:', newAnswer);
+          setAnswers(prev => {
+            const filtered = prev.filter(a => !(a.uid === newAnswer.uid && a.question_index === newAnswer.question_index));
+            const updated = [...filtered, newAnswer];
+            console.log('Updated answers state:', updated);
+            return updated;
+          });
         }
       })
       .subscribe();
@@ -230,12 +230,15 @@ const MatchPage = () => {
 
         const player = players.find(p => p.uid === answer.uid);
         if (player) {
+          const newScore = (player.score || 0) + points;
+          console.log(`Updating score for ${player.name} (${player.uid}): ${player.score} + ${points} = ${newScore}`);
           const { error: playerErr } = await supabase
             .from('players')
-            .update({ score: (player.score || 0) + points, ready: false })
+            .update({ score: newScore, ready: false })
             .eq('match_id', match.id)
             .eq('uid', answer.uid);
           if (playerErr) console.error('Player score update error:', playerErr);
+          else console.log('Score update successful for', player.name);
         }
       }
 
@@ -268,10 +271,15 @@ const MatchPage = () => {
     const currentAnswers = answers.filter(
       a => a.question_index === match.current_question_index
     );
+    console.log(`Checking answers: ${currentAnswers.length}/${players.length} players answered`);
+    console.log('Current answers:', currentAnswers.map(a => ({ uid: a.uid, choice: a.choice_text })));
+    console.log('Players:', players.map(p => ({ uid: p.uid, name: p.name })));
+    
     const allAnswered = players.length > 0 && currentAnswers.length === players.length;
 
     // Immediately proceed to round end when all players have answered
     if (allAnswered) {
+      console.log('All players answered, revealing answers');
       setRoundProcessed(true);
       revealAnswers();
       return;
