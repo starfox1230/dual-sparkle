@@ -210,20 +210,20 @@ const MatchPage = () => {
       console.log('🧹 Clearing answers for new question:', match.current_question_index);
       setAnswers([]);
       
-      // Refresh quiz solutions for hosts when new questions start
-      if (isHost && matchId) {
-        console.log('🔑 Refreshing quiz solutions for new question...');
+      // Fetch quiz solutions for ALL players (not just hosts) when new questions start
+      if (matchId) {
+        console.log('🔑 Fetching quiz solutions for round review...');
         getQuizSolutions(matchId)
           .then(solutions => {
             setQuizSolutions(solutions);
-            console.log('✅ Quiz solutions refreshed:', solutions.length, 'questions');
+            console.log('✅ Quiz solutions fetched:', solutions.length, 'questions');
           })
           .catch(error => {
-            console.error('❌ Failed to refresh quiz solutions:', error);
+            console.error('❌ Failed to fetch quiz solutions:', error);
           });
       }
     }
-  }, [match?.current_question_index, match?.status, isHost, matchId]);
+  }, [match?.current_question_index, match?.status, matchId]);
 
   // Reset round processed state when entering new phases
   useEffect(() => {
@@ -240,11 +240,12 @@ const revealAnswers = useCallback(async () => {
     console.log('🎯 Starting answer reveal and scoring process');
     
     try {
-      // --------------------- THE FIX IS HERE ---------------------
+      // 1. FIRST, transition to the round_end phase.
+      await startPhase(match.id, 'round_end');
+      console.log('✅ Phase transitioned to round_end');
 
-      // 1. FIRST, reset the ready state for all players.
-      // This ensures that when the phase changes to 'round_end', the condition 
-      // to immediately skip to the next round will be false.
+      // 2. Reset the ready state for all players AFTER transitioning to round_end
+      // This ensures players can manually ready up to continue
       console.log('🔄 Resetting ready states...');
       for (const player of players) {
         const { error: readyErr } = await supabase
@@ -257,10 +258,6 @@ const revealAnswers = useCallback(async () => {
           console.error(`❌ Ready reset failed for ${player.name}:`, readyErr);
         }
       }
-
-      // 2. NOW, transition to the round_end phase.
-      await startPhase(match.id, 'round_end');
-      console.log('✅ Phase transitioned to round_end');
       
       // The rest of the function continues as before, processing scores...
       const currentAnswers = answers.filter(a => a.question_index === match.current_question_index);
