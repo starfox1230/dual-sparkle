@@ -649,9 +649,9 @@ const MatchPage = () => {
             <Badge variant="secondary" className="bg-secondary text-secondary-foreground">
               {match.status.replace('_', ' ').toUpperCase()}
             </Badge>
-            {match.status !== 'lobby' && (
+            {match.status !== 'lobby' && quizData && (
               <Badge variant="outline" className="border-neon-cyan text-neon-cyan">
-                Question {match.current_question_index + 1} of {match.quiz?.questions?.length || 0}
+                Question {match.current_question_index + 1} of {quizData.questions?.length || 0}
               </Badge>
             )}
           </div>
@@ -792,16 +792,16 @@ const MatchPage = () => {
                           onClick={() => handleAnswer(index)}
                           disabled={isDisabled}
                           variant="outline"
-                          className={`h-16 text-left justify-start ${
+                          className={`h-auto min-h-16 text-left justify-start whitespace-normal py-4 ${
                             isSelected 
                               ? 'border-neon-green bg-neon-green/10 text-neon-green shadow-glow-success' 
                               : 'border-card-border hover:border-primary hover:text-primary'
                           } ${isDisabled && !isSelected ? 'opacity-50' : ''}`}
                         >
-                          <span className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center mr-3 font-orbitron font-bold">
+                          <span className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center mr-3 font-orbitron font-bold flex-shrink-0">
                             {String.fromCharCode(65 + index)}
                           </span>
-                          {option}
+                          <span className="flex-1 text-wrap">{option}</span>
                         </Button>
                       );
                     })}
