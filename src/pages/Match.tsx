@@ -30,7 +30,7 @@ const MatchPage = () => {
   // Removed answeringPhaseStartTime and playersWhoAnswered - using player.answered instead
   const { toast } = useToast();
 
-  const currentQuestion = match?.quiz.questions[match.current_question_index];
+  const currentQuestion = match?.quiz?.questions?.[match.current_question_index];
   const currentSolution = quizSolutions.find(s => s.question_index === match?.current_question_index);
   const isHost = currentUser && match && currentUser.id === match.host_uid;
   const currentPlayer = players.find(p => p.uid === currentUser?.id);
@@ -405,7 +405,7 @@ const MatchPage = () => {
     if (players.length > 0 && players.every(p => p.ready)) {
       setNextQuestionTriggered(true);
       const nextIndex = match.current_question_index + 1;
-      if (nextIndex < (match.quiz as SafeQuiz).questions.length) {
+      if (nextIndex < (match.quiz as SafeQuiz)?.questions?.length) {
         startPhase(match.id, 'question_reveal', nextIndex);
       } else {
         startPhase(match.id, 'finished');
@@ -577,7 +577,7 @@ const MatchPage = () => {
             </Badge>
             {match.status !== 'lobby' && (
               <Badge variant="outline" className="border-neon-cyan text-neon-cyan">
-                Question {match.current_question_index + 1} of {match.quiz.questions.length}
+                Question {match.current_question_index + 1} of {match.quiz?.questions?.length || 0}
               </Badge>
             )}
           </div>
