@@ -80,12 +80,24 @@ Deno.serve(async (req) => {
     // Get all answers for this question
     const { data: answers, error: answersError } = await supabase
       .from('answers')
-      .select('uid, choice_text, question_index')
+      .select('uid, choice_text, question_index, is_correct')
       .eq('match_id', matchId)
       .eq('question_index', questionIndex)
 
     if (answersError) {
       throw new Error(`Failed to fetch answers: ${answersError.message}`)
+    }
+
+    // Check if this round has already been scored
+    if (answers && answers.length > 0 && answers[0].is_correct !== null) {
+      console.log(`⚠️ Question ${questionIndex} already scored, skipping duplicate scoring`)
+      return new Response(
+        JSON.stringify({ success: true, message: 'Already scored' }),
+        { 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 200 
+        }
+      )
     }
 
     // Get the correct answer
