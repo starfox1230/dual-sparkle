@@ -12,6 +12,7 @@ import { Zap, Gamepad2, Users } from 'lucide-react';
 const Generator = () => {
   const [quizJson, setQuizJson] = useState('');
   const [hostName, setHostName] = useState('');
+  const [timerSeconds, setTimerSeconds] = useState(15);
   const [isCreating, setIsCreating] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -61,7 +62,7 @@ const Generator = () => {
 
     setIsCreating(true);
     try {
-      const match = await createMatch(quiz, hostName);
+      const match = await createMatch(quiz, hostName, timerSeconds);
       toast({
         title: "Match Created!",
         description: "Redirecting to match lobby...",
@@ -134,6 +135,20 @@ const Generator = () => {
                   placeholder="Enter your name"
                   value={hostName}
                   onChange={(e) => setHostName(e.target.value)}
+                  className="bg-input border-input-border text-foreground"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="timer" className="text-foreground">Timer Duration (seconds)</Label>
+                <Input
+                  id="timer"
+                  type="number"
+                  min="5"
+                  max="60"
+                  placeholder="Timer seconds"
+                  value={timerSeconds}
+                  onChange={(e) => setTimerSeconds(Number(e.target.value) || 15)}
                   className="bg-input border-input-border text-foreground"
                 />
               </div>

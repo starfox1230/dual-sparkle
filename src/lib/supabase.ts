@@ -111,7 +111,7 @@ export async function ensureAuth(): Promise<any> {
 }
 
 // Match management functions
-export async function createMatch(quiz: Quiz, hostName: string): Promise<Match> {
+export async function createMatch(quiz: Quiz, hostName: string, timerSeconds: number = 15): Promise<Match> {
   const user = await ensureAuth();
   
   console.log('🔒 Creating secure match with separated quiz data');
@@ -119,7 +119,8 @@ export async function createMatch(quiz: Quiz, hostName: string): Promise<Match> 
   // Use the secure function to create match with separated data
   const { data: matchId, error: createErr } = await supabase.rpc('create_secure_match', {
     p_quiz_name: quiz.quizName,
-    p_quiz_data: quiz
+    p_quiz_data: quiz,
+    p_timer_seconds: timerSeconds
   });
   
   if (createErr) {
