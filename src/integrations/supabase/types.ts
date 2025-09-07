@@ -175,6 +175,10 @@ export type Database = {
           | { p_quiz_data: Json; p_quiz_name: string; p_timer_seconds?: number }
         Returns: string
       }
+      generate_random_id: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
       get_quiz_solutions: {
         Args: { p_match_id: string }
         Returns: {
