@@ -653,7 +653,7 @@ const MatchPage = () => {
 
             {match.status === 'answering' && otherPlayer && (
               <div className="text-center text-muted-foreground">
-                {answers.some(
+                {currentQuestionAnswers.some(
                   a => a.uid === otherPlayer.uid && a.question_index === match.current_question_index
                 )
                   ? `✅ ${otherPlayer.name} has answered`
