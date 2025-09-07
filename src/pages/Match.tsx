@@ -288,7 +288,13 @@ const revealAnswers = useCallback(async () => {
         const points = isCorrect ? 1 : 0;
         const player = players.find(p => p.uid === answer.uid);
         
-        console.log(`⚡ ${player?.name}: "${answer.choice_text}" - ${isCorrect ? 'CORRECT' : 'WRONG'} (${points} points)`);
+        console.log(`⚡ Processing answer for ${player?.name || 'Unknown Player'} (${answer.uid}):`, {
+          choice: answer.choice_text,
+          correctAnswer: currentSolution.correct_answer,
+          isCorrect,
+          points,
+          currentScore: player?.score || 0
+        });
 
         // Update answer correctness
         const { error: ansErr } = await supabase
@@ -303,7 +309,7 @@ const revealAnswers = useCallback(async () => {
         // Update player score
         if (player && points > 0) {
           const newScore = (player.score || 0) + points;
-          console.log(`🏆 Updating ${player.name}: ${player.score} + ${points} = ${newScore}`);
+          console.log(`🏆 Updating score for ${player.name} (${answer.uid}): ${player.score || 0} + ${points} = ${newScore}`);
           
           const { error: scoreErr } = await supabase
             .from('players')
@@ -311,7 +317,15 @@ const revealAnswers = useCallback(async () => {
             .eq('match_id', match.id)
             .eq('uid', answer.uid);
           
-          if (scoreErr) console.error(`❌ Score update failed for ${player.name}:`, scoreErr);
+          if (scoreErr) {
+            console.error(`❌ Score update failed for ${player.name}:`, scoreErr);
+          } else {
+            console.log(`✅ Score updated successfully for ${player.name}`);
+          }
+        } else if (player) {
+          console.log(`⭕ No points awarded to ${player.name} - incorrect answer`);
+        } else {
+          console.error(`❌ Could not find player for uid: ${answer.uid}`);
         }
       }
 
