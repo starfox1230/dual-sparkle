@@ -233,16 +233,36 @@ const MatchPage = () => {
     }
   }, [match?.status, match?.current_question_index]);
 
-  const revealAnswers = useCallback(async () => {
+const revealAnswers = useCallback(async () => {
+    // The condition to enter the function remains the same
     if (!match || !currentQuestion || !currentSolution || roundProcessed) return;
 
     console.log('🎯 Starting answer reveal and scoring process');
     
     try {
-      // First transition to round_end phase
+      // --------------------- THE FIX IS HERE ---------------------
+
+      // 1. FIRST, reset the ready state for all players.
+      // This ensures that when the phase changes to 'round_end', the condition 
+      // to immediately skip to the next round will be false.
+      console.log('🔄 Resetting ready states...');
+      for (const player of players) {
+        const { error: readyErr } = await supabase
+          .from('players')
+          .update({ ready: false })
+          .eq('match_id', match.id)
+          .eq('uid', player.uid);
+        
+        if (readyErr) {
+          console.error(`❌ Ready reset failed for ${player.name}:`, readyErr);
+        }
+      }
+
+      // 2. NOW, transition to the round_end phase.
       await startPhase(match.id, 'round_end');
       console.log('✅ Phase transitioned to round_end');
       
+      // The rest of the function continues as before, processing scores...
       const currentAnswers = answers.filter(a => a.question_index === match.current_question_index);
       console.log('📝 Processing answers:', currentAnswers.map(a => ({ 
         player: players.find(p => p.uid === a.uid)?.name, 
@@ -250,7 +270,6 @@ const MatchPage = () => {
         correct: currentSolution.correct_answer 
       })));
 
-      // Process answers and calculate scores
       for (const answer of currentAnswers) {
         const isCorrect = answer.choice_text === currentSolution.correct_answer;
         const points = isCorrect ? 1 : 0;
@@ -266,13 +285,9 @@ const MatchPage = () => {
           .eq('uid', answer.uid)
           .eq('question_index', match.current_question_index);
         
-        if (ansErr) {
-          console.error('❌ Answer update failed:', ansErr);
-        } else {
-          console.log('✅ Answer correctness updated');
-        }
+        if (ansErr) console.error('❌ Answer update failed:', ansErr);
 
-        // Update player score if they got points
+        // Update player score
         if (player && points > 0) {
           const newScore = (player.score || 0) + points;
           console.log(`🏆 Updating ${player.name}: ${player.score} + ${points} = ${newScore}`);
@@ -283,33 +298,17 @@ const MatchPage = () => {
             .eq('match_id', match.id)
             .eq('uid', answer.uid);
           
-          if (scoreErr) {
-            console.error(`❌ Score update failed for ${player.name}:`, scoreErr);
-          } else {
-            console.log(`✅ Score updated for ${player.name}`);
-          }
+          if (scoreErr) console.error(`❌ Score update failed for ${player.name}:`, scoreErr);
         }
       }
 
-      // Reset ready state for all players
-      console.log('🔄 Resetting ready states...');
-      for (const player of players) {
-        const { error: readyErr } = await supabase
-          .from('players')
-          .update({ ready: false })
-          .eq('match_id', match.id)
-          .eq('uid', player.uid);
-        
-        if (readyErr) {
-          console.error(`❌ Ready reset failed for ${player.name}:`, readyErr);
-        }
-      }
+      // 3. The 'reset ready state' block that was at the end has been removed from here.
 
       console.log('🎉 Answer reveal and scoring complete!');
     } catch (error) {
       console.error('💥 Reveal answers error:', error);
     }
-  }, [match, currentQuestion, currentSolution, answers, players, isHost]);
+  }, [match, currentQuestion, currentSolution, answers, players, roundProcessed]); // Adjusted dependencies as isHost is not used inside anymore
 
   useEffect(() => {
     if (!match || !isHost) return;
