@@ -36,6 +36,27 @@ const MatchPage = () => {
   const allReady = players.length === 2 && players.every(p => p.ready);
   const hasAnswered = answers.some(a => a.uid === currentUser?.id && a.question_index === match?.current_question_index);
 
+  // Debug logging for answer tracking
+  useEffect(() => {
+    if (match?.status === 'answering' && currentUser) {
+      const currentAnswers = answers.filter(a => a.question_index === match.current_question_index);
+      console.log('🔍 Answer Status Debug:', {
+        currentUser: currentUser.id,
+        currentUserName: currentPlayer?.name,
+        currentQuestionIndex: match.current_question_index,
+        hasAnswered,
+        currentAnswers: currentAnswers.map(a => ({
+          uid: a.uid,
+          playerName: players.find(p => p.uid === a.uid)?.name,
+          choice: a.choice_text,
+          questionIndex: a.question_index
+        })),
+        totalAnswers: answers.length,
+        playersInMatch: players.map(p => ({ uid: p.uid, name: p.name }))
+      });
+    }
+  }, [answers, match?.current_question_index, match?.status, currentUser, hasAnswered, currentPlayer?.name, players]);
+
   useEffect(() => {
     if (!matchId) return;
 
@@ -204,38 +225,50 @@ const MatchPage = () => {
     setSelectedChoice(null);
   }, [match?.current_question_index]);
 
-  // Clear answers when a new question is revealed and fetch fresh quiz solutions
+  // Clear answers when transitioning between questions and fetch quiz solutions
   useEffect(() => {
     if (match?.status === 'question_reveal') {
       console.log('🧹 Clearing answers for new question:', match.current_question_index);
       setAnswers([]);
+      setSelectedChoice(null); // Clear selection when new question starts
       
-      // Fetch quiz solutions for ALL players (not just hosts) when new questions start
-      if (matchId) {
-        console.log('🔑 Fetching quiz solutions for round review...');
+      // Fetch quiz solutions early for better performance during answer processing
+      if (matchId && quizSolutions.length === 0) {
+        console.log('🔑 Fetching quiz solutions for answer validation...');
         getQuizSolutions(matchId)
           .then(solutions => {
             setQuizSolutions(solutions);
-            console.log('✅ Quiz solutions fetched:', solutions.length, 'questions');
+            console.log('✅ Quiz solutions loaded:', solutions.length, 'questions');
           })
           .catch(error => {
             console.error('❌ Failed to fetch quiz solutions:', error);
+            // Add retry logic for critical function
+            setTimeout(() => {
+              getQuizSolutions(matchId)
+                .then(solutions => {
+                  setQuizSolutions(solutions);
+                  console.log('✅ Quiz solutions loaded on retry:', solutions.length, 'questions');
+                })
+                .catch(retryError => {
+                  console.error('❌ Quiz solutions retry failed:', retryError);
+                });
+            }, 2000);
           });
       }
     }
-  }, [match?.current_question_index, match?.status, matchId]);
+  }, [match?.current_question_index, match?.status, matchId, quizSolutions.length]);
 
-  // Fetch quiz solutions when entering round_end phase for answer review
+  // Ensure we have quiz solutions during answering phase for real-time scoring
   useEffect(() => {
-    if (match?.status === 'round_end' && matchId && quizSolutions.length === 0) {
-      console.log('🔑 Fetching quiz solutions for answer review...');
+    if (match?.status === 'answering' && matchId && quizSolutions.length === 0) {
+      console.log('🔑 Loading quiz solutions for answer phase...');
       getQuizSolutions(matchId)
         .then(solutions => {
           setQuizSolutions(solutions);
-          console.log('✅ Quiz solutions loaded for review:', solutions.length, 'questions');
+          console.log('✅ Quiz solutions loaded for answering:', solutions.length, 'questions');
         })
         .catch(error => {
-          console.error('❌ Failed to fetch quiz solutions for review:', error);
+          console.error('❌ Failed to fetch quiz solutions during answering:', error);
         });
     }
   }, [match?.status, matchId, quizSolutions.length]);
@@ -249,33 +282,16 @@ const MatchPage = () => {
   }, [match?.status, match?.current_question_index]);
 
 const revealAnswers = useCallback(async () => {
-    // The condition to enter the function remains the same
-    if (!match || !currentQuestion || !currentSolution || roundProcessed) return;
+    if (!match || !currentQuestion || !currentSolution || roundProcessed) {
+      console.log('⏳ Skipping reveal answers - missing data or already processed');
+      return;
+    }
 
     console.log('🎯 Starting answer reveal and scoring process');
+    setRoundProcessed(true); // Set this early to prevent duplicate calls
     
     try {
-      // 1. FIRST, reset the ready state for all players.
-      // This ensures that when the phase changes to 'round_end', the condition 
-      // to immediately skip to the next round will be false.
-      console.log('🔄 Resetting ready states...');
-      for (const player of players) {
-        const { error: readyErr } = await supabase
-          .from('players')
-          .update({ ready: false })
-          .eq('match_id', match.id)
-          .eq('uid', player.uid);
-        
-        if (readyErr) {
-          console.error(`❌ Ready reset failed for ${player.name}:`, readyErr);
-        }
-      }
-
-      // 2. THEN, transition to the round_end phase.
-      await startPhase(match.id, 'round_end');
-      console.log('✅ Phase transitioned to round_end');
-      
-      // The rest of the function continues as before, processing scores...
+      // Get current answers before any state changes
       const currentAnswers = answers.filter(a => a.question_index === match.current_question_index);
       console.log('📝 Processing answers:', currentAnswers.map(a => ({ 
         player: players.find(p => p.uid === a.uid)?.name, 
@@ -283,7 +299,20 @@ const revealAnswers = useCallback(async () => {
         correct: currentSolution.correct_answer 
       })));
 
-      for (const answer of currentAnswers) {
+      // 1. Reset ready states for all players FIRST
+      console.log('🔄 Resetting ready states...');
+      const readyUpdates = players.map(player => 
+        supabase
+          .from('players')
+          .update({ ready: false })
+          .eq('match_id', match.id)
+          .eq('uid', player.uid)
+      );
+      
+      await Promise.all(readyUpdates);
+
+      // 2. Process answers and update scores in parallel for better performance
+      const answerUpdates = currentAnswers.map(async (answer) => {
         const isCorrect = answer.choice_text === currentSolution.correct_answer;
         const points = isCorrect ? 1 : 0;
         const player = players.find(p => p.uid === answer.uid);
@@ -297,45 +326,48 @@ const revealAnswers = useCallback(async () => {
         });
 
         // Update answer correctness
-        const { error: ansErr } = await supabase
+        const { error: answerError } = await supabase
           .from('answers')
           .update({ is_correct: isCorrect, points })
           .eq('match_id', match.id)
           .eq('uid', answer.uid)
           .eq('question_index', match.current_question_index);
-        
-        if (ansErr) console.error('❌ Answer update failed:', ansErr);
 
-        // Update player score
+        if (answerError) {
+          console.error('❌ Answer update failed:', answerError);
+        }
+
+        // Update player score if points were earned
         if (player && points > 0) {
           const newScore = (player.score || 0) + points;
-          console.log(`🏆 Updating score for ${player.name} (${answer.uid}): ${player.score || 0} + ${points} = ${newScore}`);
+          console.log(`🏆 Updating score for ${player.name}: ${player.score || 0} + ${points} = ${newScore}`);
           
-          const { error: scoreErr } = await supabase
+          const { error: scoreError } = await supabase
             .from('players')
             .update({ score: newScore })
             .eq('match_id', match.id)
             .eq('uid', answer.uid);
           
-          if (scoreErr) {
-            console.error(`❌ Score update failed for ${player.name}:`, scoreErr);
+          if (scoreError) {
+            console.error(`❌ Score update failed for ${player.name}:`, scoreError);
           } else {
             console.log(`✅ Score updated successfully for ${player.name}`);
           }
-        } else if (player) {
-          console.log(`⭕ No points awarded to ${player.name} - incorrect answer`);
-        } else {
-          console.error(`❌ Could not find player for uid: ${answer.uid}`);
         }
-      }
+      });
 
-      // 3. The 'reset ready state' block that was at the end has been removed from here.
+      await Promise.all(answerUpdates);
+
+      // 3. Transition to round_end phase after all scoring is complete
+      await startPhase(match.id, 'round_end');
+      console.log('✅ Phase transitioned to round_end');
 
       console.log('🎉 Answer reveal and scoring complete!');
     } catch (error) {
       console.error('💥 Reveal answers error:', error);
+      setRoundProcessed(false); // Reset on error so it can be retried
     }
-  }, [match, currentQuestion, currentSolution, answers, players, roundProcessed]); // Adjusted dependencies as isHost is not used inside anymore
+  }, [match, currentQuestion, currentSolution, answers, players, roundProcessed]);
 
   useEffect(() => {
     if (!match || !isHost) return;
@@ -667,8 +699,14 @@ const revealAnswers = useCallback(async () => {
                 {answers.some(
                   a => a.uid === otherPlayer.uid && a.question_index === match.current_question_index
                 )
-                  ? `${otherPlayer.name} has answered`
-                  : `Waiting for ${otherPlayer.name}...`}
+                  ? `✅ ${otherPlayer.name} has answered`
+                  : `⏳ Waiting for ${otherPlayer.name}...`}
+              </div>
+            )}
+            
+            {match.status === 'answering' && (
+              <div className="text-center text-sm text-muted-foreground">
+                Your answer: {hasAnswered ? '✅ Submitted' : '⏳ Not submitted'}
               </div>
             )}
 
