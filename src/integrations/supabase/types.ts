@@ -170,7 +170,9 @@ export type Database = {
     }
     Functions: {
       create_secure_match: {
-        Args: { p_quiz_data: Json; p_quiz_name: string }
+        Args:
+          | { p_quiz_data: Json; p_quiz_name: string }
+          | { p_quiz_data: Json; p_quiz_name: string; p_timer_seconds?: number }
         Returns: string
       }
       get_quiz_solutions: {
