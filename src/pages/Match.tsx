@@ -358,76 +358,81 @@ const MatchPage = () => {
     }
   }, [match?.status, match?.current_question_index, matchId]);
 
-
-
-// ADD THIS NEW SIMPLIFIED SCORING FUNCTION
-const scoreRoundAndEnd = useCallback(async (matchId: string, questionIndex: number) => {
-  try {
-    console.log('🔢 Triggering server-side scoring...');
-    // The backend now handles all phase transitions. We just need to call the function.
-    const { error } = await supabase.functions.invoke('score-round', {
-      body: { matchId, questionIndex }
-    });
-
-    if (error) {
-      console.error('Failed to invoke score-round function:', error);
-      toast({
-        title: "Function Error",
-        description: "Could not communicate with the scoring service.",
-        variant: "destructive",
+  // Score the round and transition to round_end
+  const scoreRoundAndEnd = useCallback(async (matchId: string, questionIndex: number) => {
+    try {
+      console.log('🔢 Triggering server-side scoring...');
+      const { data, error } = await supabase.functions.invoke('score-round', {
+        body: { matchId, questionIndex }
       });
+      
+      if (error) {
+        console.error('Scoring error:', error);
+        throw error;
+      }
+      
+      console.log('✅ Scoring completed:', data);
+      await startPhase(matchId, 'round_end');
+    } catch (error) {
+      console.error('Failed to score round:', error);
+      // Fallback to just changing phase without scoring
+      await startPhase(matchId, 'round_end');
     }
-  } catch (err) {
-    console.error('Catastrophic error invoking function:', err);
-  }
-}, [toast]);
+  }, []);
 
-// ADD THIS NEW CONSOLIDATED USEEFFECT HOOK
-useEffect(() => {
-  // This effect is the single source of truth for ending the answering phase.
-  // Only the host's client should trigger scoring.
-  if (!match || !isHost || match.status !== 'answering') {
-    return;
-  }
+  // Check if all players have answered using player.answered field
+  const checkAllAnswered = useCallback(() => {
+    if (!match || !isHost || match.status !== 'answering') return;
+    
+    const allAnswered = players.length > 0 && players.every(p => p.answered);
+    
+    if (allAnswered && !roundProcessed) {
+      console.log('🎯 All players answered! Scoring and moving to round_end...');
+      setRoundProcessed(true);
+      scoreRoundAndEnd(match.id, match.current_question_index);
+    }
+  }, [match, players, isHost, roundProcessed, scoreRoundAndEnd]);
 
-  // Prevent multiple triggers within the same render cycle.
-  let isScoringTriggered = false;
-  const attemptScoring = () => {
-    if (isScoringTriggered) return;
-    isScoringTriggered = true;
-    scoreRoundAndEnd(match.id, match.current_question_index);
-  };
+  // Simplified answering phase logic - just check for all answered or timer
+  useEffect(() => {
+    if (!match || !isHost || match.status !== 'answering') {
+      setRoundProcessed(false);
+      return;
+    }
 
-  // Condition 1: All players have submitted an answer.
-  const allHaveAnswered = players.length > 0 && players.every(p => p.answered);
-  if (allHaveAnswered) {
-    console.log('🎯 All players answered. Triggering scoring.');
-    attemptScoring();
-    return; // Scoring triggered, no need for a timer.
-  }
+    // Skip if already processed this round
+    if (roundProcessed) return;
 
-  // Condition 2: The timer runs out.
-  const phaseStartTime = new Date(match.phase_start).getTime();
-  const timeRemaining = (phaseStartTime + match.timer_seconds * 1000) - Date.now();
+    // Check if all players answered
+    checkAllAnswered();
 
-  if (timeRemaining <= 0) {
-    console.log('⏰ Timer already expired. Triggering scoring.');
-    attemptScoring();
-    return;
-  }
+    // Set timer for automatic transition
+    const now = Date.now();
+    const start = new Date(match.phase_start).getTime();
+    const remaining = match.timer_seconds * 1000 - (now - start);
+    
+    if (remaining <= 0) {
+      console.log('⏰ Timer expired, scoring and moving to round_end...');
+      setRoundProcessed(true);
+      scoreRoundAndEnd(match.id, match.current_question_index);
+      return;
+    }
 
-  const timerId = setTimeout(() => {
-    console.log('⏰ Timer expired via timeout. Triggering scoring.');
-    attemptScoring();
-  }, timeRemaining);
+    if (remaining > 0) {
+      const timeout = setTimeout(() => {
+        console.log('⏰ Timer expired (timeout), scoring and moving to round_end...');
+        setRoundProcessed(true);
+        scoreRoundAndEnd(match.id, match.current_question_index);
+      }, remaining);
 
-  // Clean up the timer if the phase changes before it expires.
-  return () => clearTimeout(timerId);
+      return () => clearTimeout(timeout);
+    }
+  }, [match, isHost, roundProcessed, checkAllAnswered]);
 
-}, [match, players, isHost, scoreRoundAndEnd]);
-
-
-
+  // Watch for player answer status changes to trigger all-answered check
+  useEffect(() => {
+    checkAllAnswered();
+  }, [players, checkAllAnswered]);
 
   useEffect(() => {
     if (!match || !isHost) return;
