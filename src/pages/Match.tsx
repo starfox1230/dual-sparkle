@@ -255,12 +255,9 @@ const revealAnswers = useCallback(async () => {
     console.log('🎯 Starting answer reveal and scoring process');
     
     try {
-      // 1. FIRST, transition to the round_end phase.
-      await startPhase(match.id, 'round_end');
-      console.log('✅ Phase transitioned to round_end');
-
-      // 2. Reset the ready state for all players AFTER transitioning to round_end
-      // This ensures players can manually ready up to continue
+      // 1. FIRST, reset the ready state for all players.
+      // This ensures that when the phase changes to 'round_end', the condition 
+      // to immediately skip to the next round will be false.
       console.log('🔄 Resetting ready states...');
       for (const player of players) {
         const { error: readyErr } = await supabase
@@ -273,6 +270,10 @@ const revealAnswers = useCallback(async () => {
           console.error(`❌ Ready reset failed for ${player.name}:`, readyErr);
         }
       }
+
+      // 2. THEN, transition to the round_end phase.
+      await startPhase(match.id, 'round_end');
+      console.log('✅ Phase transitioned to round_end');
       
       // The rest of the function continues as before, processing scores...
       const currentAnswers = answers.filter(a => a.question_index === match.current_question_index);
