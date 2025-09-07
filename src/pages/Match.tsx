@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,11 @@ const MatchPage = () => {
   const [roundAnswers, setRoundAnswers] = useState<Answer[]>([]);
   const [currentQuestionAnswers, setCurrentQuestionAnswers] = useState<Answer[]>([]);
   const [quizSolutions, setQuizSolutions] = useState<QuizSolution[]>([]);
+  
+  // --- NEW STATE FOR PRE-LOADED DATA ---
+  const [quizData, setQuizData] = useState<SafeQuiz | null>(null);
+  const [allSolutions, setAllSolutions] = useState<QuizSolution[]>([]);
+  
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [playerName, setPlayerName] = useState('');
   const [showJoinForm, setShowJoinForm] = useState(false);
@@ -30,8 +35,16 @@ const MatchPage = () => {
   // Removed answeringPhaseStartTime and playersWhoAnswered - using player.answered instead
   const { toast } = useToast();
 
-  const currentQuestion = match?.quiz?.questions?.[match.current_question_index];
-  const currentSolution = quizSolutions.find(s => s.question_index === match?.current_question_index);
+  // --- USEMEMO FOR EFFICIENT AND STABLE DATA ACCESS ---
+  const currentQuestion = useMemo(() => {
+    if (!quizData || match === null) return null;
+    return quizData.questions?.[match.current_question_index];
+  }, [quizData, match?.current_question_index]);
+
+  const currentSolution = useMemo(() => {
+    if (!allSolutions.length || match === null) return null;
+    return allSolutions.find(s => s.question_index === match.current_question_index);
+  }, [allSolutions, match?.current_question_index]);
   const isHost = currentUser && match && currentUser.id === match.host_uid;
   const currentPlayer = players.find(p => p.uid === currentUser?.id);
   const otherPlayer = players.find(p => p.uid !== currentUser?.id);
@@ -273,20 +286,35 @@ const MatchPage = () => {
     }
   }, [match?.current_question_index, match?.status]);
 
-  // Load quiz solutions when match starts - needed for immediate scoring
+  // --- NEW EFFECT FOR PRE-LOADING ALL QUIZ DATA ---
   useEffect(() => {
-    if (match && matchId && quizSolutions.length === 0 && match.status !== 'lobby') {
-      console.log('🔑 Loading quiz solutions for immediate scoring...');
-      getQuizSolutions(matchId)
-        .then(solutions => {
-          setQuizSolutions(solutions);
-          console.log('✅ Quiz solutions loaded:', solutions.length, 'questions');
-        })
-        .catch(error => {
-          console.error('❌ Failed to fetch quiz solutions:', error);
-        });
+    // We only run this fetch if the match has started and we haven't already loaded the data.
+    if (match?.status !== 'lobby' && !quizData && match.quiz && matchId) {
+      const fetchFullQuizAndSolutions = async () => {
+        console.log('📚 Pre-loading all quiz data and solutions...');
+        try {
+          // Use the quiz data already available in the match object
+          setQuizData(match.quiz);
+          console.log(`✅ ${match.quiz.questions.length} questions loaded.`);
+
+          // Fetch all solutions for the match at the same time
+          const solutions = await getQuizSolutions(matchId);
+          setAllSolutions(solutions);
+          console.log(`✅ ${solutions.length} solutions loaded.`);
+
+        } catch (error) {
+          console.error('❌ Failed to pre-load quiz data:', error);
+          toast({
+            title: "Error",
+            description: "Could not load quiz data. Please refresh.",
+            variant: "destructive",
+          });
+        }
+      };
+
+      fetchFullQuizAndSolutions();
     }
-  }, [match?.status, matchId, quizSolutions.length]);
+  }, [match?.status, match?.quiz, matchId, quizData, toast]);
 
   // Reset round processed state when entering new phases
   useEffect(() => {
@@ -516,7 +544,12 @@ const MatchPage = () => {
     });
   };
 
-  // ... rest of the component remains unchanged
+  // --- COMPREHENSIVE LOADING STATE FOR THE MAIN CONTENT AREA ---
+  const isGameContentLoading = useMemo(() => {
+    return (match?.status !== 'lobby' && match?.status !== 'finished') && // Only apply in active game phases
+           (!quizData || !allSolutions.length || !currentQuestion);    // Check if our pre-loaded data is ready
+  }, [match?.status, quizData, allSolutions.length, currentQuestion]);
+
   if (showJoinForm) {
     return (
       <div className="min-h-screen bg-gradient-bg flex items-center justify-center p-4">
@@ -621,14 +654,15 @@ const MatchPage = () => {
           />
 
         {/* Game Content */}
-        {(!match || !currentQuestion) && match?.status !== 'lobby' && match?.status !== 'finished' ? (
+        {isGameContentLoading ? (
+          // Display a single, reliable loading card
           <Card className="bg-card border-card-border border-2 shadow-glow-primary">
             <div className="p-8 text-center">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-              <p className="text-muted-foreground">Loading quiz data...</p>
+              <p className="text-muted-foreground">Loading Quiz Data...</p>
             </div>
           </Card>
-        ) : match.status === 'lobby' && (
+        ) : match.status === 'lobby' ? (
           <Card className="bg-card border-card-border border-2 shadow-glow-primary">
             <div className="p-8 text-center space-y-6">
               <h2 className="text-3xl font-orbitron font-bold text-foreground">Lobby</h2>
@@ -668,9 +702,7 @@ const MatchPage = () => {
               </div>
             </div>
           </Card>
-        )}
-
-        {(match.status === 'question_reveal' || match.status === 'answering') && currentQuestion && (
+        ) : (match.status === 'question_reveal' || match.status === 'answering') && currentQuestion ? (
           <div className="space-y-6">
             <Timer
               phaseStart={match.phase_start}
@@ -728,18 +760,8 @@ const MatchPage = () => {
               </div>
             </Card>
           </div>
-        )}
-
-        {match.status === 'round_end' && (
-          !currentQuestion || !currentSolution ? (
-            <Card className="bg-card border-card-border border-2 shadow-glow-primary">
-              <div className="p-8 text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-                <p className="text-muted-foreground">Loading results...</p>
-              </div>
-            </Card>
-          ) : (
-            <div className="space-y-6">
+        ) : match.status === 'round_end' && currentQuestion && currentSolution ? (
+          <div className="space-y-6">
               <Card className="bg-card border-card-border border-2 shadow-glow-primary">
                 <div className="p-8 text-center space-y-6">
                   <h2 className="text-2xl font-orbitron font-bold text-foreground">
@@ -806,19 +828,8 @@ const MatchPage = () => {
                 </div>
               </Card>
             </div>
-          )
-        )}
-
-        {match.status === 'finished' && (
-          !currentPlayer || !players.length ? (
-            <Card className="bg-card border-card-border border-2 shadow-glow-primary">
-              <div className="p-8 text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-                <p className="text-muted-foreground">Loading final results...</p>
-              </div>
-            </Card>
-          ) : (
-            <Card className="bg-card border-card-border border-2 shadow-glow-primary">
+        ) : match.status === 'finished' ? (
+          <Card className="bg-card border-card-border border-2 shadow-glow-primary">
               <div className="p-8 text-center space-y-6">
                 <h2 className="text-4xl font-orbitron font-bold text-foreground">
                   Quiz Complete!
@@ -851,8 +862,7 @@ const MatchPage = () => {
                 </div>
               </div>
             </Card>
-          )
-        )}
+        ) : null}
       </div>
     </div>
   );
