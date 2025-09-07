@@ -64,6 +64,7 @@ export interface Player {
   joined_at: string;
   ready: boolean;
   score: number;
+  answered: boolean;
 }
 
 export interface Answer {

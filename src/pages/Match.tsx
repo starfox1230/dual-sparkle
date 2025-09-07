@@ -27,8 +27,7 @@ const MatchPage = () => {
   const [showQR, setShowQR] = useState(false);
   const [roundProcessed, setRoundProcessed] = useState(false);
   const [nextQuestionTriggered, setNextQuestionTriggered] = useState(false);
-  // Removed answeringPhaseStartTime - no longer needed
-  const [playersWhoAnswered, setPlayersWhoAnswered] = useState<Set<string>>(new Set());
+  // Removed answeringPhaseStartTime and playersWhoAnswered - using player.answered instead
   const { toast } = useToast();
 
   const currentQuestion = match?.quiz.questions[match.current_question_index];
@@ -37,7 +36,7 @@ const MatchPage = () => {
   const currentPlayer = players.find(p => p.uid === currentUser?.id);
   const otherPlayer = players.find(p => p.uid !== currentUser?.id);
   const allReady = players.length === 2 && players.every(p => p.ready);
-  const hasAnswered = currentUser ? playersWhoAnswered.has(currentUser.id) : false;
+  const hasAnswered = currentPlayer?.answered || false;
 
   // Debug logging for answer tracking
   useEffect(() => {
@@ -147,15 +146,9 @@ const MatchPage = () => {
               newQuestion: newMatch.current_question_index
             });
             
-            // Track when answering phase starts
+            // Log when answering phase starts
             if (prev?.status !== 'answering' && newMatch.status === 'answering') {
               console.log('🕒 Answering phase started');
-              setPlayersWhoAnswered(new Set());
-            }
-            
-            // Clear answer tracking when leaving answering phase
-            if (prev?.status === 'answering' && newMatch.status !== 'answering') {
-              setPlayersWhoAnswered(new Set());
             }
             
             return newMatch;
@@ -181,9 +174,7 @@ const MatchPage = () => {
           setPlayers(prev => {
             const updatedPlayer = payload.new as Player;
             const updated = prev.map(p => p.uid === updatedPlayer.uid ? updatedPlayer : p);
-            console.log('🔄 Player updated:', updatedPlayer.name, 'Score:', updatedPlayer.score, 'Ready:', updatedPlayer.ready);
-            
-            // Removed timestamp-based answer tracking - now using direct answer subscription
+            console.log('🔄 Player updated:', updatedPlayer.name, 'Score:', updatedPlayer.score, 'Ready:', updatedPlayer.ready, 'Answered:', updatedPlayer.answered);
             
             return updated;
           });
@@ -203,16 +194,9 @@ const MatchPage = () => {
         if (payload.eventType === 'INSERT' && payload.new) {
           const newAnswer = payload.new as Answer;
           
-          // Update playersWhoAnswered for current question
-          if (newAnswer.question_index === match?.current_question_index) {
-            setPlayersWhoAnswered(prev => {
-              const newSet = new Set(prev);
-              newSet.add(newAnswer.uid);
-              const playerName = players.find(p => p.uid === newAnswer.uid)?.name || 'Unknown';
-              console.log('✅ Player answered detected via answer subscription:', playerName);
-              return newSet;
-            });
-          }
+          // Log new answer received
+          const playerName = players.find(p => p.uid === newAnswer.uid)?.name || 'Unknown';
+          console.log('✅ Player answered detected via answer subscription:', playerName);
           
           setAnswers(prev => {
             if (prev.some(a => a.uid === newAnswer.uid && a.question_index === newAnswer.question_index)) {
@@ -277,7 +261,15 @@ const MatchPage = () => {
       setAnswers([]);
       setSelectedChoice(null);
       setCurrentQuestionAnswers([]);
-      setPlayersWhoAnswered(new Set());
+      
+      // Reset answered status for all players
+      if (currentUser) {
+        supabase
+          .from('players')
+          .update({ answered: false })
+          .eq('match_id', match.id)
+          .then(() => console.log('🔄 Reset all players answered status'));
+      }
     }
   }, [match?.current_question_index, match?.status]);
 
@@ -346,18 +338,18 @@ const MatchPage = () => {
     }
   }, []);
 
-  // Check if all players have answered using direct answer tracking
+  // Check if all players have answered using player.answered field
   const checkAllAnswered = useCallback(() => {
     if (!match || !isHost || match.status !== 'answering') return;
     
-    const allAnswered = players.length > 0 && playersWhoAnswered.size === players.length;
+    const allAnswered = players.length > 0 && players.every(p => p.answered);
     
     if (allAnswered && !roundProcessed) {
       console.log('🎯 All players answered! Scoring and moving to round_end...');
       setRoundProcessed(true);
       scoreRoundAndEnd(match.id, match.current_question_index);
     }
-  }, [match, playersWhoAnswered, players, isHost, roundProcessed, scoreRoundAndEnd]);
+  }, [match, players, isHost, roundProcessed, scoreRoundAndEnd]);
 
   // Simplified answering phase logic - just check for all answered or timer
   useEffect(() => {
@@ -394,10 +386,10 @@ const MatchPage = () => {
     }
   }, [match, isHost, roundProcessed, checkAllAnswered]);
 
-  // Watch for players who answered to trigger all-answered check
+  // Watch for player answer status changes to trigger all-answered check
   useEffect(() => {
     checkAllAnswered();
-  }, [playersWhoAnswered, checkAllAnswered]);
+  }, [players, checkAllAnswered]);
 
   useEffect(() => {
     if (!match || !isHost) return;
@@ -475,19 +467,27 @@ const MatchPage = () => {
     setSelectedChoice(choiceIndex);
 
     try {
-      // Only submit the answer - NO scoring here
-      const { error: answerError } = await supabase
-        .from('answers')
-        .upsert({
-          match_id: match.id,
-          uid: currentUser.id,
-          question_index: match.current_question_index,
-          choice_index: choiceIndex,
-          choice_text: choiceText,
-          submitted_at: new Date().toISOString(),
-        });
+      // Submit answer AND update answered status (like ready functionality)
+      const [answerResult, playerResult] = await Promise.all([
+        supabase
+          .from('answers')
+          .upsert({
+            match_id: match.id,
+            uid: currentUser.id,
+            question_index: match.current_question_index,
+            choice_index: choiceIndex,
+            choice_text: choiceText,
+            submitted_at: new Date().toISOString(),
+          }),
+        supabase
+          .from('players')
+          .update({ answered: true })
+          .eq('match_id', match.id)
+          .eq('uid', currentUser.id)
+      ]);
 
-      if (answerError) throw answerError;
+      if (answerResult.error) throw answerResult.error;
+      if (playerResult.error) throw playerResult.error;
 
       toast({
         title: "Answer Submitted!",
@@ -613,12 +613,11 @@ const MatchPage = () => {
         </div>
 
         {/* Players & Score */}
-        <ScoreBoard
-          players={players}
-          currentUserId={currentUser?.id}
-          playersWhoAnswered={playersWhoAnswered}
-          phase={match.status}
-        />
+          <ScoreBoard 
+            players={players} 
+            currentUserId={currentUser?.id}
+            phase={match.status}
+          />
 
         {/* Game Content */}
         {match.status === 'lobby' && (
@@ -673,7 +672,7 @@ const MatchPage = () => {
 
             {match.status === 'answering' && otherPlayer && (
               <div className="text-center text-muted-foreground">
-                {playersWhoAnswered.has(otherPlayer.uid)
+                {otherPlayer.answered
                   ? `✅ ${otherPlayer.name} has answered`
                   : `⏳ Waiting for ${otherPlayer.name}...`}
               </div>
@@ -812,7 +811,7 @@ const MatchPage = () => {
                 )}
               </div>
 
-              <ScoreBoard players={players} currentUserId={currentUser?.id} final={true} playersWhoAnswered={playersWhoAnswered} phase={'finished'} />
+              <ScoreBoard players={players} currentUserId={currentUser?.id} final={true} phase={'finished'} />
               
               <div className="flex gap-4 justify-center">
                 <Button

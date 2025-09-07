@@ -96,6 +96,7 @@ export type Database = {
       }
       players: {
         Row: {
+          answered: boolean
           joined_at: string
           match_id: string
           name: string
@@ -104,6 +105,7 @@ export type Database = {
           uid: string
         }
         Insert: {
+          answered?: boolean
           joined_at?: string
           match_id: string
           name: string
@@ -112,6 +114,7 @@ export type Database = {
           uid: string
         }
         Update: {
+          answered?: boolean
           joined_at?: string
           match_id?: string
           name?: string

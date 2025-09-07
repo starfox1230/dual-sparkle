@@ -8,7 +8,6 @@ interface ScoreBoardProps {
   currentUserId?: string;
   final?: boolean;
   phase?: string;
-  playersWhoAnswered?: Set<string>;
 }
 
 export const ScoreBoard = ({
@@ -16,7 +15,6 @@ export const ScoreBoard = ({
   currentUserId,
   final = false,
   phase,
-  playersWhoAnswered = new Set(),
 }: ScoreBoardProps) => {
   if (players.length === 0) return null;
 
@@ -29,7 +27,7 @@ export const ScoreBoard = ({
         const isCurrentUser = player.uid === currentUserId;
         const winner = isWinner(player);
         
-        const hasAnswered = playersWhoAnswered.has(player.uid);
+        const hasAnswered = player.answered;
 
         return (
           <Card
