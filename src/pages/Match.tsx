@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { supabase, joinMatch, startPhase, type Match, type Player, type Answer } from '@/lib/supabase';
+import { supabase, joinMatch, startPhase, getQuizSolutions, type Match, type Player, type Answer, type QuizSolution, type SafeQuiz } from '@/lib/supabase';
 import type { User } from '@supabase/supabase-js';
 import { useToast } from '@/hooks/use-toast';
 import { Timer } from '@/components/Timer';
@@ -17,6 +17,7 @@ const MatchPage = () => {
   const [match, setMatch] = useState<Match | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [answers, setAnswers] = useState<Answer[]>([]);
+  const [quizSolutions, setQuizSolutions] = useState<QuizSolution[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [playerName, setPlayerName] = useState('');
   const [showJoinForm, setShowJoinForm] = useState(false);
@@ -28,6 +29,7 @@ const MatchPage = () => {
   // The currentQuestionRef was causing a stale closure issue in the subscription. It has been removed.
 
   const currentQuestion = match?.quiz.questions[match.current_question_index];
+  const currentSolution = quizSolutions.find(s => s.question_index === match?.current_question_index);
   const isHost = currentUser && match && currentUser.id === match.host_uid;
   const currentPlayer = players.find(p => p.uid === currentUser?.id);
   const otherPlayer = players.find(p => p.uid !== currentUser?.id);
@@ -206,7 +208,7 @@ const MatchPage = () => {
   }, [match?.status, match?.id]);
 
   const revealAnswers = useCallback(async () => {
-    if (!match || !currentQuestion) return;
+    if (!match || !currentQuestion || !currentSolution || roundProcessed) return;
 
     console.log('🎯 Starting answer reveal and scoring process');
     
@@ -219,12 +221,12 @@ const MatchPage = () => {
       console.log('📝 Processing answers:', currentAnswers.map(a => ({ 
         player: players.find(p => p.uid === a.uid)?.name, 
         choice: a.choice_text, 
-        correct: currentQuestion.correctAnswer 
+        correct: currentSolution.correct_answer 
       })));
 
       // Process answers and calculate scores
       for (const answer of currentAnswers) {
-        const isCorrect = answer.choice_text === currentQuestion.correctAnswer;
+        const isCorrect = answer.choice_text === currentSolution.correct_answer;
         const points = isCorrect ? 1 : 0;
         const player = players.find(p => p.uid === answer.uid);
         
@@ -281,7 +283,7 @@ const MatchPage = () => {
     } catch (error) {
       console.error('💥 Reveal answers error:', error);
     }
-  }, [match, currentQuestion, answers, players, isHost]);
+  }, [match, currentQuestion, currentSolution, answers, players, isHost]);
 
   useEffect(() => {
     if (!match || !isHost) return;
@@ -344,7 +346,7 @@ const MatchPage = () => {
     if (players.length > 0 && players.every(p => p.ready)) {
       setNextQuestionTriggered(true);
       const nextIndex = match.current_question_index + 1;
-      if (nextIndex < match.quiz.questions.length) {
+      if (nextIndex < (match.quiz as SafeQuiz).questions.length) {
         startPhase(match.id, 'question_reveal', nextIndex);
       } else {
         startPhase(match.id, 'finished');
@@ -645,7 +647,7 @@ const MatchPage = () => {
           </div>
         )}
 
-        {match.status === 'round_end' && currentQuestion && (
+        {match.status === 'round_end' && currentQuestion && currentSolution && (
           <div className="space-y-6">
             <Card className="bg-card border-card-border border-2 shadow-glow-primary">
               <div className="p-8 text-center space-y-6">
@@ -654,19 +656,19 @@ const MatchPage = () => {
                 </h2>
                 
                 <div className="text-xl font-bold">
-                  <span className="text-success">Correct Answer: {currentQuestion.correctAnswer}</span>
+                  <span className="text-success">Correct Answer: {currentSolution.correct_answer}</span>
                 </div>
                 
-                {currentQuestion.explanation && (
+                {currentSolution.explanation && (
                   <p className="text-muted-foreground max-w-2xl mx-auto">
-                    {currentQuestion.explanation}
+                    {currentSolution.explanation}
                   </p>
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
                   {players.map((player) => {
                     const answer = answers.find(a => a.uid === player.uid && a.question_index === match.current_question_index);
-                    const isCorrect = answer ? answer.choice_text === currentQuestion.correctAnswer : false;
+                    const isCorrect = answer ? answer.choice_text === currentSolution.correct_answer : false;
                     const points = isCorrect ? 1 : 0;
 
                     return (

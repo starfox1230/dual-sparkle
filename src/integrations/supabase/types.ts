@@ -129,11 +129,58 @@ export type Database = {
           },
         ]
       }
+      quiz_solutions: {
+        Row: {
+          correct_answer: string
+          created_at: string | null
+          explanation: string | null
+          id: string
+          match_id: string
+          question_index: number
+        }
+        Insert: {
+          correct_answer: string
+          created_at?: string | null
+          explanation?: string | null
+          id?: string
+          match_id: string
+          question_index: number
+        }
+        Update: {
+          correct_answer?: string
+          created_at?: string | null
+          explanation?: string | null
+          id?: string
+          match_id?: string
+          question_index?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quiz_solutions_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      create_secure_match: {
+        Args: { p_quiz_data: Json; p_quiz_name: string }
+        Returns: string
+      }
+      get_quiz_solutions: {
+        Args: { p_match_id: string }
+        Returns: {
+          correct_answer: string
+          explanation: string
+          question_index: number
+        }[]
+      }
       start_phase: {
         Args: { p_match_id: string; p_qindex?: number; p_status: string }
         Returns: undefined

@@ -21,6 +21,16 @@ export interface Quiz {
   questions: Question[];
 }
 
+export interface SafeQuiz {
+  quizName: string;
+  questions: SafeQuestion[];
+}
+
+export interface SafeQuestion {
+  question: string;
+  options: string[];
+}
+
 export interface Question {
   question: string;
   options: string[];
@@ -28,10 +38,16 @@ export interface Question {
   explanation?: string;
 }
 
+export interface QuizSolution {
+  question_index: number;
+  correct_answer: string;
+  explanation?: string;
+}
+
 export interface Match {
   id: string;
   quiz_name: string;
-  quiz: Quiz;
+  quiz: SafeQuiz; // Now contains only safe data (no answers)
   host_uid: string;
   status: 'lobby' | 'question_reveal' | 'answering' | 'round_end' | 'finished';
   current_question_index: number;
@@ -98,25 +114,33 @@ export async function ensureAuth(): Promise<any> {
 export async function createMatch(quiz: Quiz, hostName: string): Promise<Match> {
   const user = await ensureAuth();
   
-  const { data: match, error: mErr } = await supabase
+  console.log('🔒 Creating secure match with separated quiz data');
+  
+  // Use the secure function to create match with separated data
+  const { data: matchId, error: createErr } = await supabase.rpc('create_secure_match', {
+    p_quiz_name: quiz.quizName,
+    p_quiz_data: quiz
+  });
+  
+  if (createErr) {
+    console.error('Secure match creation failed:', createErr);
+    throw createErr;
+  }
+  
+  // Fetch the created match
+  const { data: match, error: fetchErr } = await supabase
     .from('matches')
-    .insert({
-      quiz_name: quiz.quizName,
-      quiz,
-      host_uid: user.id,
-      status: 'lobby',
-      timer_seconds: 30,
-    })
     .select('*')
+    .eq('id', matchId)
     .single();
     
-  if (mErr) throw mErr;
+  if (fetchErr) throw fetchErr;
   
   // Add host as first player
   const { error: pErr } = await supabase
     .from('players')
     .insert({
-      match_id: match.id,
+      match_id: matchId,
       uid: user.id,
       name: hostName || 'Host',
       ready: false,
@@ -125,7 +149,22 @@ export async function createMatch(quiz: Quiz, hostName: string): Promise<Match> 
     
   if (pErr) throw pErr;
   
+  console.log('✅ Secure match created successfully');
   return match;
+}
+
+// Function to get quiz solutions (only for hosts)
+export async function getQuizSolutions(matchId: string): Promise<QuizSolution[]> {
+  const { data, error } = await supabase.rpc('get_quiz_solutions', {
+    p_match_id: matchId
+  });
+  
+  if (error) {
+    console.error('Failed to fetch quiz solutions:', error);
+    throw error;
+  }
+  
+  return data || [];
 }
 
 export async function joinMatch(matchId: string, playerName: string): Promise<void> {
