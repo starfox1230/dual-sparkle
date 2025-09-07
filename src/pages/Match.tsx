@@ -37,12 +37,12 @@ const MatchPage = () => {
 
   // --- USEMEMO FOR EFFICIENT AND STABLE DATA ACCESS ---
   const currentQuestion = useMemo(() => {
-    if (!quizData || match === null) return null;
+    if (!quizData || !match) return null;
     return quizData.questions?.[match.current_question_index];
   }, [quizData, match?.current_question_index]);
 
   const currentSolution = useMemo(() => {
-    if (!allSolutions.length || match === null) return null;
+    if (!allSolutions.length || !match) return null;
     return allSolutions.find(s => s.question_index === match.current_question_index);
   }, [allSolutions, match?.current_question_index]);
   const isHost = currentUser && match && currentUser.id === match.host_uid;
@@ -289,7 +289,7 @@ const MatchPage = () => {
   // --- NEW EFFECT FOR PRE-LOADING ALL QUIZ DATA ---
   useEffect(() => {
     // We only run this fetch if the match has started and we haven't already loaded the data.
-    if (match?.status !== 'lobby' && !quizData && match.quiz && matchId) {
+    if (match && match.status !== 'lobby' && !quizData && match.quiz && matchId) {
       const fetchFullQuizAndSolutions = async () => {
         console.log('📚 Pre-loading all quiz data and solutions...');
         try {
@@ -546,9 +546,10 @@ const MatchPage = () => {
 
   // --- COMPREHENSIVE LOADING STATE FOR THE MAIN CONTENT AREA ---
   const isGameContentLoading = useMemo(() => {
-    return (match?.status !== 'lobby' && match?.status !== 'finished') && // Only apply in active game phases
+    if (!match) return false; // Don't show loading if match is null
+    return (match.status !== 'lobby' && match.status !== 'finished') && // Only apply in active game phases
            (!quizData || !allSolutions.length || !currentQuestion);    // Check if our pre-loaded data is ready
-  }, [match?.status, quizData, allSolutions.length, currentQuestion]);
+  }, [match, quizData, allSolutions.length, currentQuestion]);
 
   if (showJoinForm) {
     return (
