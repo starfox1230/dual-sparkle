@@ -78,6 +78,31 @@ Deno.serve(async (req) => {
       throw new Error('Only the host can trigger scoring')
     }
 
+    // --- START: ADD THIS BLOCK ---
+    // Atomically update the match status to 'scoring' to prevent race conditions.
+    // This acts as a distributed lock. Only the first request to do this will succeed.
+    console.log(`🔒 Attempting to acquire lock for match ${matchId}...`)
+    const { error: lockError } = await supabase
+      .from('matches')
+      .update({ status: 'scoring' })
+      .eq('id', matchId)
+      .eq('status', 'answering') // Crucially, only update if it's in the correct state
+      .select('id')
+      .single()
+
+    if (lockError) {
+      console.log(`⚠️ Lock failed. Another process is likely scoring. Aborting.`)
+      return new Response(
+        JSON.stringify({ success: true, message: 'Scoring already in progress.' }),
+        { 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 200 
+        }
+      )
+    }
+    console.log(`✅ Lock acquired for match ${matchId}.`)
+    // --- END: ADD THIS BLOCK ---
+
     // Get all answers for this question with timing data
     const { data: answers, error: answersError } = await supabase
       .from('answers')
