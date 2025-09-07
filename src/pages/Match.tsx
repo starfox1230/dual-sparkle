@@ -17,6 +17,7 @@ const MatchPage = () => {
   const [match, setMatch] = useState<Match | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [answers, setAnswers] = useState<Answer[]>([]);
+  const [roundAnswers, setRoundAnswers] = useState<Answer[]>([]);
   const [quizSolutions, setQuizSolutions] = useState<QuizSolution[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [playerName, setPlayerName] = useState('');
@@ -256,6 +257,26 @@ const MatchPage = () => {
       console.log('🔄 Reset round processed state for phase:', match.status);
     }
   }, [match?.status, match?.current_question_index]);
+
+  // Fetch answers for round_end display
+  useEffect(() => {
+    if (match?.status === 'round_end' && matchId) {
+      console.log('🔍 Fetching answers for round display...');
+      const fetchRoundAnswers = async () => {
+        const { data: roundAnswersData } = await supabase
+          .from('answers')
+          .select('*')
+          .eq('match_id', matchId)
+          .eq('question_index', match.current_question_index);
+
+        if (roundAnswersData) {
+          setRoundAnswers(roundAnswersData);
+          console.log('✅ Round answers loaded:', roundAnswersData.length, 'answers');
+        }
+      };
+      fetchRoundAnswers();
+    }
+  }, [match?.status, match?.current_question_index, matchId]);
 
   // Check if all players have answered - simplified phase transition
   const checkAllAnswered = useCallback(() => {
@@ -686,7 +707,7 @@ const MatchPage = () => {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
                   {players.map((player) => {
-                    const answer = answers.find(a => a.uid === player.uid && a.question_index === match.current_question_index);
+                    const answer = roundAnswers.find(a => a.uid === player.uid && a.question_index === match.current_question_index);
                     const isCorrect = answer ? answer.choice_text === currentSolution.correct_answer : false;
                     const points = isCorrect ? 1 : 0;
 
