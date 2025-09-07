@@ -129,6 +129,30 @@ export type Database = {
           },
         ]
       }
+      quiz_data: {
+        Row: {
+          created_at: string
+          id: string
+          match_id: string
+          questions: Json
+          quiz_name: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          match_id: string
+          questions: Json
+          quiz_name: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          match_id?: string
+          questions?: Json
+          quiz_name?: string
+        }
+        Relationships: []
+      }
       quiz_solutions: {
         Row: {
           correct_answer: string
