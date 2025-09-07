@@ -225,50 +225,26 @@ const MatchPage = () => {
     setSelectedChoice(null);
   }, [match?.current_question_index]);
 
-  // Clear answers when transitioning between questions and fetch quiz solutions
+  // Clear answers when transitioning between questions
   useEffect(() => {
     if (match?.status === 'question_reveal') {
       console.log('🧹 Clearing answers for new question:', match.current_question_index);
       setAnswers([]);
-      setSelectedChoice(null); // Clear selection when new question starts
-      
-      // Fetch quiz solutions early for better performance during answer processing
-      if (matchId && quizSolutions.length === 0) {
-        console.log('🔑 Fetching quiz solutions for answer validation...');
-        getQuizSolutions(matchId)
-          .then(solutions => {
-            setQuizSolutions(solutions);
-            console.log('✅ Quiz solutions loaded:', solutions.length, 'questions');
-          })
-          .catch(error => {
-            console.error('❌ Failed to fetch quiz solutions:', error);
-            // Add retry logic for critical function
-            setTimeout(() => {
-              getQuizSolutions(matchId)
-                .then(solutions => {
-                  setQuizSolutions(solutions);
-                  console.log('✅ Quiz solutions loaded on retry:', solutions.length, 'questions');
-                })
-                .catch(retryError => {
-                  console.error('❌ Quiz solutions retry failed:', retryError);
-                });
-            }, 2000);
-          });
-      }
+      setSelectedChoice(null);
     }
-  }, [match?.current_question_index, match?.status, matchId, quizSolutions.length]);
+  }, [match?.current_question_index, match?.status]);
 
-  // Ensure we have quiz solutions during answering phase for real-time scoring
+  // Load quiz solutions when match starts - needed for immediate scoring
   useEffect(() => {
-    if (match?.status === 'answering' && matchId && quizSolutions.length === 0) {
-      console.log('🔑 Loading quiz solutions for answer phase...');
+    if (match && matchId && quizSolutions.length === 0 && match.status !== 'lobby') {
+      console.log('🔑 Loading quiz solutions for immediate scoring...');
       getQuizSolutions(matchId)
         .then(solutions => {
           setQuizSolutions(solutions);
-          console.log('✅ Quiz solutions loaded for answering:', solutions.length, 'questions');
+          console.log('✅ Quiz solutions loaded:', solutions.length, 'questions');
         })
         .catch(error => {
-          console.error('❌ Failed to fetch quiz solutions during answering:', error);
+          console.error('❌ Failed to fetch quiz solutions:', error);
         });
     }
   }, [match?.status, matchId, quizSolutions.length]);
@@ -281,152 +257,59 @@ const MatchPage = () => {
     }
   }, [match?.status, match?.current_question_index]);
 
-const revealAnswers = useCallback(async () => {
-    if (!match || !currentQuestion || !currentSolution || roundProcessed) {
-      console.log('⏳ Skipping reveal answers - missing data or already processed');
-      return;
-    }
-
-    console.log('🎯 Starting answer reveal and scoring process');
-    setRoundProcessed(true); // Set this early to prevent duplicate calls
+  // Check if all players have answered - simplified phase transition
+  const checkAllAnswered = useCallback(() => {
+    if (!match || !isHost || match.status !== 'answering') return;
     
-    try {
-      // Get current answers before any state changes
-      const currentAnswers = answers.filter(a => a.question_index === match.current_question_index);
-      console.log('📝 Processing answers:', currentAnswers.map(a => ({ 
-        player: players.find(p => p.uid === a.uid)?.name, 
-        choice: a.choice_text, 
-        correct: currentSolution.correct_answer 
-      })));
-
-      // 1. Reset ready states for all players FIRST
-      console.log('🔄 Resetting ready states...');
-      const readyUpdates = players.map(player => 
-        supabase
-          .from('players')
-          .update({ ready: false })
-          .eq('match_id', match.id)
-          .eq('uid', player.uid)
-      );
-      
-      await Promise.all(readyUpdates);
-
-      // 2. Process answers and update scores in parallel for better performance
-      const answerUpdates = currentAnswers.map(async (answer) => {
-        const isCorrect = answer.choice_text === currentSolution.correct_answer;
-        const points = isCorrect ? 1 : 0;
-        const player = players.find(p => p.uid === answer.uid);
-        
-        console.log(`⚡ Processing answer for ${player?.name || 'Unknown Player'} (${answer.uid}):`, {
-          choice: answer.choice_text,
-          correctAnswer: currentSolution.correct_answer,
-          isCorrect,
-          points,
-          currentScore: player?.score || 0
-        });
-
-        // Update answer correctness
-        const { error: answerError } = await supabase
-          .from('answers')
-          .update({ is_correct: isCorrect, points })
-          .eq('match_id', match.id)
-          .eq('uid', answer.uid)
-          .eq('question_index', match.current_question_index);
-
-        if (answerError) {
-          console.error('❌ Answer update failed:', answerError);
-        }
-
-        // Update player score if points were earned
-        if (player && points > 0) {
-          const newScore = (player.score || 0) + points;
-          console.log(`🏆 Updating score for ${player.name}: ${player.score || 0} + ${points} = ${newScore}`);
-          
-          const { error: scoreError } = await supabase
-            .from('players')
-            .update({ score: newScore })
-            .eq('match_id', match.id)
-            .eq('uid', answer.uid);
-          
-          if (scoreError) {
-            console.error(`❌ Score update failed for ${player.name}:`, scoreError);
-          } else {
-            console.log(`✅ Score updated successfully for ${player.name}`);
-          }
-        }
-      });
-
-      await Promise.all(answerUpdates);
-
-      // 3. Transition to round_end phase after all scoring is complete
-      await startPhase(match.id, 'round_end');
-      console.log('✅ Phase transitioned to round_end');
-
-      console.log('🎉 Answer reveal and scoring complete!');
-    } catch (error) {
-      console.error('💥 Reveal answers error:', error);
-      setRoundProcessed(false); // Reset on error so it can be retried
+    const currentAnswers = answers.filter(a => a.question_index === match.current_question_index);
+    const allAnswered = players.length > 0 && currentAnswers.length === players.length;
+    
+    if (allAnswered && !roundProcessed) {
+      console.log('🎯 All players answered! Moving to round_end...');
+      setRoundProcessed(true);
+      startPhase(match.id, 'round_end');
     }
-  }, [match, currentQuestion, currentSolution, answers, players, roundProcessed]);
+  }, [match, answers, players, isHost, roundProcessed]);
 
+  // Simplified answering phase logic - just check for all answered or timer
   useEffect(() => {
-    if (!match || !isHost) return;
-
-    if (match.status !== 'answering') {
+    if (!match || !isHost || match.status !== 'answering') {
       setRoundProcessed(false);
       return;
     }
 
-    if (roundProcessed) return;
-    
-    // Make sure we have quiz solutions loaded before processing
-    if (!currentSolution) {
-      console.log('⏳ Waiting for quiz solutions to load...');
-      return;
-    }
-    
-    // Check if all players have answered
-    const currentAnswers = answers.filter(
-      a => a.question_index === match.current_question_index
-    );
-    console.log(`📊 Answer check: ${currentAnswers.length}/${players.length} players answered`);
-    console.log('📝 Current answers:', currentAnswers.map(a => ({ 
-      player: players.find(p => p.uid === a.uid)?.name || a.uid, 
-      choice: a.choice_text 
-    })));
-    console.log('👥 Players in match:', players.map(p => ({ uid: p.uid, name: p.name })));
-    
-    const allAnswered = players.length > 0 && currentAnswers.length === players.length;
+    // Check if all players answered
+    checkAllAnswered();
 
-    // Immediately proceed to round end when all players have answered
-    if (allAnswered) {
-      console.log('🎯 All players answered! Starting reveal process...');
-      setRoundProcessed(true);
-      revealAnswers();
-      return;
-    }
-
+    // Set timer for automatic transition
     const now = Date.now();
     const start = new Date(match.phase_start).getTime();
     const remaining = match.timer_seconds * 1000 - (now - start);
     
-    if (remaining <= 0) {
-      if (!roundProcessed) {
-        console.log('⏰ Timer expired, revealing answers...');
-        setRoundProcessed(true);
-        revealAnswers();
-      }
+    if (remaining <= 0 && !roundProcessed) {
+      console.log('⏰ Timer expired, moving to round_end...');
+      setRoundProcessed(true);
+      startPhase(match.id, 'round_end');
       return;
     }
 
-    const timeout = setTimeout(() => {
-      console.log('⏰ Timer expired (timeout), revealing answers...');
-      setRoundProcessed(true);
-      revealAnswers();
-    }, remaining);
+    if (remaining > 0) {
+      const timeout = setTimeout(() => {
+        if (!roundProcessed) {
+          console.log('⏰ Timer expired (timeout), moving to round_end...');
+          setRoundProcessed(true);
+          startPhase(match.id, 'round_end');
+        }
+      }, remaining);
 
-    return () => clearTimeout(timeout);
-  }, [match, answers, players, isHost, roundProcessed, revealAnswers, currentSolution]);
+      return () => clearTimeout(timeout);
+    }
+  }, [match, isHost, roundProcessed, checkAllAnswered]);
+
+  // Watch for new answers to trigger all-answered check
+  useEffect(() => {
+    checkAllAnswered();
+  }, [answers, checkAllAnswered]);
 
   useEffect(() => {
     if (!match || !isHost) return;
@@ -498,32 +381,67 @@ const revealAnswers = useCallback(async () => {
   };
 
   const handleAnswer = async (choiceIndex: number) => {
-    if (!currentUser || !match || !currentQuestion || hasAnswered) return;
+    if (!currentUser || !match || !currentQuestion || hasAnswered || !currentPlayer) return;
+
+    const choiceText = currentQuestion.options[choiceIndex];
+    
+    // Calculate score immediately like the readiness pattern
+    const isCorrect = currentSolution ? choiceText === currentSolution.correct_answer : false;
+    const points = isCorrect ? 1 : 0;
+    const newScore = currentPlayer.score + points;
+
+    console.log(`🎯 ${currentPlayer.name} answering:`, {
+      choice: choiceText,
+      correct: currentSolution?.correct_answer,
+      isCorrect,
+      points,
+      newScore
+    });
 
     setSelectedChoice(choiceIndex);
 
-     const newAnswer: Omit<Answer, 'is_correct' | 'points'> = {
-      match_id: match.id,
-      uid: currentUser.id,
-      question_index: match.current_question_index,
-      choice_index: choiceIndex,
-      choice_text: currentQuestion.options[choiceIndex],
-      submitted_at: new Date().toISOString(),
-    };
+    try {
+      // Submit answer with immediate scoring
+      const { error: answerError } = await supabase
+        .from('answers')
+        .upsert({
+          match_id: match.id,
+          uid: currentUser.id,
+          question_index: match.current_question_index,
+          choice_index: choiceIndex,
+          choice_text: choiceText,
+          is_correct: isCorrect,
+          points: points,
+          submitted_at: new Date().toISOString(),
+        });
 
-    // Optimistically update local state so answer feedback is immediate
-    setAnswers(prev => [
-      ...prev.filter(a => !(a.uid === currentUser.id && a.question_index === match.current_question_index)),
-      newAnswer as Answer,
-    ]);
+      if (answerError) throw answerError;
 
-    const { error } = await supabase
-      .from('answers')
-      .upsert(newAnswer);
+      // Update player score immediately (like readiness updates)
+      const { error: scoreError } = await supabase
+        .from('players')
+        .update({ 
+          score: newScore,
+          ready: false // Reset ready for next phase
+        })
+        .eq('match_id', match.id)
+        .eq('uid', currentUser.id);
 
-    if (error) {
+      if (scoreError) throw scoreError;
+
+      setSelectedChoice(null);
+      toast({
+        title: isCorrect ? "Correct! 🎉" : "Answer Submitted!",
+        description: isCorrect ? "+1 point!" : "Good luck!",
+      });
+    } catch (error) {
       console.error('Answer error:', error);
       setSelectedChoice(null);
+      toast({
+        title: "Error",
+        description: "Failed to submit answer",
+        variant: "destructive",
+      });
     }
   };
 
