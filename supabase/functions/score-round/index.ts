@@ -215,9 +215,12 @@ Deno.serve(async (req) => {
     // After all scoring is complete, transition the match to the 'round_end' phase.
     const { error: phaseError } = await supabase
       .from('matches')
-      .update({ status: 'round_end' })
+      .update({ 
+        status: 'round_end',
+        phase_start: new Date().toISOString() // This line is the fix
+      })
       .eq('id', matchId)
-
+    
     if (phaseError) {
       console.error(`Failed to transition match to round_end: ${phaseError.message}`)
       // Note: The scoring is done, but the client won't see the phase change.
