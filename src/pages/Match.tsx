@@ -225,6 +225,21 @@ const MatchPage = () => {
     }
   }, [match?.current_question_index, match?.status, matchId]);
 
+  // Fetch quiz solutions when entering round_end phase for answer review
+  useEffect(() => {
+    if (match?.status === 'round_end' && matchId && quizSolutions.length === 0) {
+      console.log('🔑 Fetching quiz solutions for answer review...');
+      getQuizSolutions(matchId)
+        .then(solutions => {
+          setQuizSolutions(solutions);
+          console.log('✅ Quiz solutions loaded for review:', solutions.length, 'questions');
+        })
+        .catch(error => {
+          console.error('❌ Failed to fetch quiz solutions for review:', error);
+        });
+    }
+  }, [match?.status, matchId, quizSolutions.length]);
+
   // Reset round processed state when entering new phases
   useEffect(() => {
     if (match?.status === 'question_reveal' || match?.status === 'answering') {
