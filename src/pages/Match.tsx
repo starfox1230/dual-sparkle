@@ -27,7 +27,7 @@ const MatchPage = () => {
   const [showQR, setShowQR] = useState(false);
   const [roundProcessed, setRoundProcessed] = useState(false);
   const [nextQuestionTriggered, setNextQuestionTriggered] = useState(false);
-  const [answeringPhaseStartTime, setAnsweringPhaseStartTime] = useState<Date | null>(null);
+  // Removed answeringPhaseStartTime - no longer needed
   const [playersWhoAnswered, setPlayersWhoAnswered] = useState<Set<string>>(new Set());
   const { toast } = useToast();
 
@@ -149,14 +149,12 @@ const MatchPage = () => {
             
             // Track when answering phase starts
             if (prev?.status !== 'answering' && newMatch.status === 'answering') {
-              console.log('🕒 Answering phase started, tracking timestamps');
-              setAnsweringPhaseStartTime(new Date());
+              console.log('🕒 Answering phase started');
               setPlayersWhoAnswered(new Set());
             }
             
             // Clear answer tracking when leaving answering phase
             if (prev?.status === 'answering' && newMatch.status !== 'answering') {
-              setAnsweringPhaseStartTime(null);
               setPlayersWhoAnswered(new Set());
             }
             
@@ -185,18 +183,7 @@ const MatchPage = () => {
             const updated = prev.map(p => p.uid === updatedPlayer.uid ? updatedPlayer : p);
             console.log('🔄 Player updated:', updatedPlayer.name, 'Score:', updatedPlayer.score, 'Ready:', updatedPlayer.ready);
             
-            // Track if player answered during answering phase
-            if (answeringPhaseStartTime && match?.status === 'answering') {
-              const updateTime = new Date();
-              if (updateTime > answeringPhaseStartTime) {
-                setPlayersWhoAnswered(prev => {
-                  const newSet = new Set(prev);
-                  newSet.add(updatedPlayer.uid);
-                  console.log('✅ Player answered detected via timestamp:', updatedPlayer.name);
-                  return newSet;
-                });
-              }
-            }
+            // Removed timestamp-based answer tracking - now using direct answer subscription
             
             return updated;
           });
@@ -215,6 +202,18 @@ const MatchPage = () => {
         
         if (payload.eventType === 'INSERT' && payload.new) {
           const newAnswer = payload.new as Answer;
+          
+          // Update playersWhoAnswered for current question
+          if (newAnswer.question_index === match?.current_question_index) {
+            setPlayersWhoAnswered(prev => {
+              const newSet = new Set(prev);
+              newSet.add(newAnswer.uid);
+              const playerName = players.find(p => p.uid === newAnswer.uid)?.name || 'Unknown';
+              console.log('✅ Player answered detected via answer subscription:', playerName);
+              return newSet;
+            });
+          }
+          
           setAnswers(prev => {
             if (prev.some(a => a.uid === newAnswer.uid && a.question_index === newAnswer.question_index)) {
               return prev;
@@ -279,7 +278,6 @@ const MatchPage = () => {
       setSelectedChoice(null);
       setCurrentQuestionAnswers([]);
       setPlayersWhoAnswered(new Set());
-      setAnsweringPhaseStartTime(null);
     }
   }, [match?.current_question_index, match?.status]);
 
@@ -326,18 +324,40 @@ const MatchPage = () => {
     }
   }, [match?.status, match?.current_question_index, matchId]);
 
-  // Check if all players have answered using timestamp tracking
+  // Score the round and transition to round_end
+  const scoreRoundAndEnd = useCallback(async (matchId: string, questionIndex: number) => {
+    try {
+      console.log('🔢 Triggering server-side scoring...');
+      const { data, error } = await supabase.functions.invoke('score-round', {
+        body: { matchId, questionIndex }
+      });
+      
+      if (error) {
+        console.error('Scoring error:', error);
+        throw error;
+      }
+      
+      console.log('✅ Scoring completed:', data);
+      await startPhase(matchId, 'round_end');
+    } catch (error) {
+      console.error('Failed to score round:', error);
+      // Fallback to just changing phase without scoring
+      await startPhase(matchId, 'round_end');
+    }
+  }, []);
+
+  // Check if all players have answered using direct answer tracking
   const checkAllAnswered = useCallback(() => {
     if (!match || !isHost || match.status !== 'answering') return;
     
     const allAnswered = players.length > 0 && playersWhoAnswered.size === players.length;
     
     if (allAnswered && !roundProcessed) {
-      console.log('🎯 All players answered (timestamp-based)! Moving to round_end...');
+      console.log('🎯 All players answered! Scoring and moving to round_end...');
       setRoundProcessed(true);
-      startPhase(match.id, 'round_end');
+      scoreRoundAndEnd(match.id, match.current_question_index);
     }
-  }, [match, playersWhoAnswered, players, isHost, roundProcessed]);
+  }, [match, playersWhoAnswered, players, isHost, roundProcessed, scoreRoundAndEnd]);
 
   // Simplified answering phase logic - just check for all answered or timer
   useEffect(() => {
@@ -355,18 +375,18 @@ const MatchPage = () => {
     const remaining = match.timer_seconds * 1000 - (now - start);
     
     if (remaining <= 0 && !roundProcessed) {
-      console.log('⏰ Timer expired, moving to round_end...');
+      console.log('⏰ Timer expired, scoring and moving to round_end...');
       setRoundProcessed(true);
-      startPhase(match.id, 'round_end');
+      scoreRoundAndEnd(match.id, match.current_question_index);
       return;
     }
 
     if (remaining > 0) {
       const timeout = setTimeout(() => {
         if (!roundProcessed) {
-          console.log('⏰ Timer expired (timeout), moving to round_end...');
+          console.log('⏰ Timer expired (timeout), scoring and moving to round_end...');
           setRoundProcessed(true);
-          startPhase(match.id, 'round_end');
+          scoreRoundAndEnd(match.id, match.current_question_index);
         }
       }, remaining);
 
@@ -449,27 +469,13 @@ const MatchPage = () => {
   };
 
   const handleAnswer = async (choiceIndex: number) => {
-    if (!currentUser || !match || !currentQuestion || hasAnswered || !currentPlayer) return;
+    if (!currentUser || !match || !currentQuestion || hasAnswered) return;
 
     const choiceText = currentQuestion.options[choiceIndex];
-    
-    // Calculate score immediately like the readiness pattern
-    const isCorrect = currentSolution ? choiceText === currentSolution.correct_answer : false;
-    const points = isCorrect ? 1 : 0;
-    const newScore = currentPlayer.score + points;
-
-    console.log(`🎯 ${currentPlayer.name} answering:`, {
-      choice: choiceText,
-      correct: currentSolution?.correct_answer,
-      isCorrect,
-      points,
-      newScore
-    });
-
     setSelectedChoice(choiceIndex);
 
     try {
-      // Submit answer with immediate scoring
+      // Only submit the answer - NO scoring here
       const { error: answerError } = await supabase
         .from('answers')
         .upsert({
@@ -478,30 +484,16 @@ const MatchPage = () => {
           question_index: match.current_question_index,
           choice_index: choiceIndex,
           choice_text: choiceText,
-          is_correct: isCorrect,
-          points: points,
           submitted_at: new Date().toISOString(),
         });
 
       if (answerError) throw answerError;
 
-      // Update player score immediately (like readiness updates)
-      const { error: scoreError } = await supabase
-        .from('players')
-        .update({ 
-          score: newScore,
-          ready: false // Reset ready for next phase
-        })
-        .eq('match_id', match.id)
-        .eq('uid', currentUser.id);
-
-      if (scoreError) throw scoreError;
-
-      setSelectedChoice(null);
       toast({
         title: "Answer Submitted!",
-        description: "Good luck!",
+        description: "Waiting for opponent...",
       });
+
     } catch (error) {
       console.error('Answer error:', error);
       setSelectedChoice(null);

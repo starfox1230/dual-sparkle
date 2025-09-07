@@ -1,1 +1,4 @@
 project_id = "bdspbocabpfvljkodjqf"
+
+[functions.score-round]
+verify_jwt = true
