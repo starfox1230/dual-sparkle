@@ -745,7 +745,7 @@ const MatchPage = () => {
                   {players.map((player) => {
                     const answer = roundAnswers.find(a => a.uid === player.uid && a.question_index === match.current_question_index);
                     const isCorrect = answer ? answer.choice_text === currentSolution.correct_answer : false;
-                    const points = isCorrect ? 1 : 0;
+                    const points = answer?.points || 0;
 
                     return (
                       <div
