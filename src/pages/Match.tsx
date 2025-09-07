@@ -18,7 +18,7 @@ const MatchPage = () => {
   const [players, setPlayers] = useState<Player[]>([]);
   const [answers, setAnswers] = useState<Answer[]>([]);
   const [roundAnswers, setRoundAnswers] = useState<Answer[]>([]);
-  const [liveAnswers, setLiveAnswers] = useState<Answer[]>([]);
+  const [currentQuestionAnswers, setCurrentQuestionAnswers] = useState<Answer[]>([]);
   const [quizSolutions, setQuizSolutions] = useState<QuizSolution[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [playerName, setPlayerName] = useState('');
@@ -36,7 +36,7 @@ const MatchPage = () => {
   const currentPlayer = players.find(p => p.uid === currentUser?.id);
   const otherPlayer = players.find(p => p.uid !== currentUser?.id);
   const allReady = players.length === 2 && players.every(p => p.ready);
-  const hasAnswered = liveAnswers.some(a => a.uid === currentUser?.id && a.question_index === match?.current_question_index);
+  const hasAnswered = currentQuestionAnswers.some(a => a.uid === currentUser?.id && a.question_index === match?.current_question_index);
 
   // Debug logging for answer tracking
   useEffect(() => {
@@ -194,8 +194,8 @@ const MatchPage = () => {
             console.log('➕ New answer received from', playerName, ':', newAnswer.choice_text);
             return [...prev, newAnswer];
           });
-          // Also update live answers for real-time status
-          setLiveAnswers(prev => {
+          // Update current question answers for real-time status
+          setCurrentQuestionAnswers(prev => {
             if (prev.some(a => a.uid === newAnswer.uid && a.question_index === newAnswer.question_index)) {
               return prev;
             }
@@ -211,8 +211,8 @@ const MatchPage = () => {
             console.log('🔄 Answer updated:', updatedAnswer.uid, 'Correct:', updatedAnswer.is_correct);
             return updated;
           });
-          // Also update live answers
-          setLiveAnswers(prev => {
+          // Update current question answers
+          setCurrentQuestionAnswers(prev => {
             const updatedAnswer = payload.new as Answer;
             return prev.map(a => 
               a.uid === updatedAnswer.uid && a.question_index === updatedAnswer.question_index 
@@ -248,8 +248,8 @@ const MatchPage = () => {
       console.log('🧹 Clearing answers for new question:', match.current_question_index);
       setAnswers([]);
       setSelectedChoice(null);
-      // Keep liveAnswers for real-time status but filter for current question
-      setLiveAnswers(prev => prev.filter(a => a.question_index === match.current_question_index));
+      // Clear current question answers for the new question
+      setCurrentQuestionAnswers([]);
     }
   }, [match?.current_question_index, match?.status]);
 
@@ -300,7 +300,7 @@ const MatchPage = () => {
   const checkAllAnswered = useCallback(() => {
     if (!match || !isHost || match.status !== 'answering') return;
     
-    const currentAnswers = liveAnswers.filter(a => a.question_index === match.current_question_index);
+    const currentAnswers = currentQuestionAnswers.filter(a => a.question_index === match.current_question_index);
     const allAnswered = players.length > 0 && currentAnswers.length === players.length;
     
     if (allAnswered && !roundProcessed) {
@@ -308,7 +308,7 @@ const MatchPage = () => {
       setRoundProcessed(true);
       startPhase(match.id, 'round_end');
     }
-  }, [match, answers, players, isHost, roundProcessed]);
+  }, [match, currentQuestionAnswers, players, isHost, roundProcessed]);
 
   // Simplified answering phase logic - just check for all answered or timer
   useEffect(() => {
@@ -348,7 +348,7 @@ const MatchPage = () => {
   // Watch for new answers to trigger all-answered check
   useEffect(() => {
     checkAllAnswered();
-  }, [liveAnswers, checkAllAnswered]);
+  }, [currentQuestionAnswers, checkAllAnswered]);
 
   useEffect(() => {
     if (!match || !isHost) return;
@@ -470,8 +470,8 @@ const MatchPage = () => {
 
       setSelectedChoice(null);
       toast({
-        title: isCorrect ? "Correct! 🎉" : "Answer Submitted!",
-        description: isCorrect ? "+1 point!" : "Good luck!",
+        title: "Answer Submitted!",
+        description: "Good luck!",
       });
     } catch (error) {
       console.error('Answer error:', error);
@@ -595,7 +595,7 @@ const MatchPage = () => {
         <ScoreBoard
           players={players}
           currentUserId={currentUser?.id}
-          answers={liveAnswers}
+          answers={currentQuestionAnswers}
           currentQuestionIndex={match.current_question_index}
           phase={match.status}
         />
@@ -794,7 +794,7 @@ const MatchPage = () => {
                 )}
               </div>
 
-              <ScoreBoard players={players} currentUserId={currentUser?.id} final={true} answers={liveAnswers} currentQuestionIndex={match.current_question_index} phase={'finished'} />
+              <ScoreBoard players={players} currentUserId={currentUser?.id} final={true} answers={currentQuestionAnswers} currentQuestionIndex={match.current_question_index} phase={'finished'} />
               
               <div className="flex gap-4 justify-center">
                 <Button
