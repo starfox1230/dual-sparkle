@@ -32,6 +32,8 @@ const MatchPage = () => {
   const [showQR, setShowQR] = useState(false);
   const [roundProcessed, setRoundProcessed] = useState(false);
   const [nextQuestionTriggered, setNextQuestionTriggered] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [preloadRetryCount, setPreloadRetryCount] = useState(0);
   // Removed answeringPhaseStartTime and playersWhoAnswered - using player.answered instead
   const { toast } = useToast();
 
@@ -286,9 +288,9 @@ const MatchPage = () => {
     }
   }, [match?.current_question_index, match?.status]);
 
-  // --- NEW EFFECT FOR PRE-LOADING ALL QUIZ DATA ---
+  // --- IMPROVED PRE-LOADING WITH RETRY LOGIC ---
   useEffect(() => {
-    // We only run this fetch if the match has started and we haven't already loaded the data.
+    // Pre-load when match starts OR when a new player joins
     if (match && match.status !== 'lobby' && !quizData && match.quiz && matchId) {
       const fetchFullQuizAndSolutions = async () => {
         console.log('📚 Pre-loading all quiz data and solutions...');
@@ -297,24 +299,36 @@ const MatchPage = () => {
           setQuizData(match.quiz);
           console.log(`✅ ${match.quiz.questions.length} questions loaded.`);
 
-          // Fetch all solutions for the match at the same time
+          // Fetch all solutions for the match with retry logic
           const solutions = await getQuizSolutions(matchId);
           setAllSolutions(solutions);
           console.log(`✅ ${solutions.length} solutions loaded.`);
+          setPreloadRetryCount(0); // Reset retry count on success
 
         } catch (error) {
           console.error('❌ Failed to pre-load quiz data:', error);
-          toast({
-            title: "Error",
-            description: "Could not load quiz data. Please refresh.",
-            variant: "destructive",
-          });
+          
+          // Retry up to 3 times with increasing delay
+          if (preloadRetryCount < 3) {
+            const retryDelay = (preloadRetryCount + 1) * 1000;
+            console.log(`🔄 Retrying pre-load in ${retryDelay}ms (attempt ${preloadRetryCount + 1}/3)`);
+            
+            setTimeout(() => {
+              setPreloadRetryCount(prev => prev + 1);
+            }, retryDelay);
+          } else {
+            toast({
+              title: "Loading Error",
+              description: "Could not load quiz data after multiple attempts. Game may not function properly.",
+              variant: "destructive",
+            });
+          }
         }
       };
 
       fetchFullQuizAndSolutions();
     }
-  }, [match?.status, match?.quiz, matchId, quizData, toast]);
+  }, [match?.status, match?.quiz, matchId, quizData, toast, preloadRetryCount]);
 
   // Reset round processed state when entering new phases
   useEffect(() => {
@@ -485,9 +499,33 @@ const MatchPage = () => {
     if (!isHost || !matchId) return;
 
     try {
-      await startPhase(matchId, 'question_reveal', 0);
+      // Start countdown before first question
+      setCountdown(3);
+      const countdownInterval = setInterval(() => {
+        setCountdown(prev => {
+          if (prev === null || prev <= 1) {
+            clearInterval(countdownInterval);
+            // Actually start the quiz after countdown
+            setTimeout(async () => {
+              await startPhase(matchId, 'question_reveal', 0);
+            }, 500);
+            return null;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      toast({
+        title: "Starting Quiz!",
+        description: "Get ready...",
+      });
     } catch (error) {
       console.error('Start error:', error);
+      toast({
+        title: "Error",
+        description: "Failed to start the quiz.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -693,7 +731,7 @@ const MatchPage = () => {
                   )}
                 </Button>
 
-                {isHost && allReady && (
+                {isHost && allReady && countdown === null && (
                   <Button
                     onClick={handleStart}
                     className="w-full bg-gradient-primary hover:shadow-glow-primary text-primary-foreground font-orbitron font-bold text-lg"
@@ -701,6 +739,15 @@ const MatchPage = () => {
                     <Zap className="w-5 h-5 mr-2" />
                     Start Quiz Battle!
                   </Button>
+                )}
+
+                {countdown !== null && (
+                  <div className="text-center">
+                    <div className="text-6xl font-orbitron font-bold text-neon-green mb-4 animate-pulse">
+                      {countdown}
+                    </div>
+                    <p className="text-muted-foreground">Get ready...</p>
+                  </div>
                 )}
               </div>
             </div>
