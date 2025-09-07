@@ -433,9 +433,11 @@ const MatchPage = () => {
     if (players.length > 0 && players.every(p => p.ready)) {
       setNextQuestionTriggered(true);
       const nextIndex = match.current_question_index + 1;
-      if (nextIndex < (match.quiz as SafeQuiz)?.questions?.length) {
+      if (quizData && nextIndex < quizData.questions?.length) {
+        console.log(`🎯 Moving to next question: ${nextIndex + 1}/${quizData.questions.length}`);
         startPhase(match.id, 'question_reveal', nextIndex);
       } else {
+        console.log('🏁 Quiz finished! All questions completed.');
         startPhase(match.id, 'finished');
       }
     }
