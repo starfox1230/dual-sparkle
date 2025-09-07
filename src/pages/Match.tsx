@@ -621,7 +621,14 @@ const MatchPage = () => {
           />
 
         {/* Game Content */}
-        {match.status === 'lobby' && (
+        {(!match || !currentQuestion) && match?.status !== 'lobby' && match?.status !== 'finished' ? (
+          <Card className="bg-card border-card-border border-2 shadow-glow-primary">
+            <div className="p-8 text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+              <p className="text-muted-foreground">Loading quiz data...</p>
+            </div>
+          </Card>
+        ) : match.status === 'lobby' && (
           <Card className="bg-card border-card-border border-2 shadow-glow-primary">
             <div className="p-8 text-center space-y-6">
               <h2 className="text-3xl font-orbitron font-bold text-foreground">Lobby</h2>
@@ -723,107 +730,128 @@ const MatchPage = () => {
           </div>
         )}
 
-        {match.status === 'round_end' && currentQuestion && currentSolution && (
-          <div className="space-y-6">
+        {match.status === 'round_end' && (
+          !currentQuestion || !currentSolution ? (
             <Card className="bg-card border-card-border border-2 shadow-glow-primary">
-              <div className="p-8 text-center space-y-6">
-                <h2 className="text-2xl font-orbitron font-bold text-foreground">
-                  {currentQuestion.question}
-                </h2>
-                
-                <div className="text-xl font-bold">
-                  <span className="text-success">Correct Answer: {currentSolution.correct_answer}</span>
-                </div>
-                
-                {currentSolution.explanation && (
-                  <p className="text-muted-foreground max-w-2xl mx-auto">
-                    {currentSolution.explanation}
-                  </p>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
-                  {players.map((player) => {
-                    const answer = roundAnswers.find(a => a.uid === player.uid && a.question_index === match.current_question_index);
-                    const isCorrect = answer ? answer.choice_text === currentSolution.correct_answer : false;
-                    const points = isCorrect ? 1 : 0;
-
-                    return (
-                      <div
-                        key={player.uid}
-                        className={`p-4 rounded-lg border-2 ${
-                          isCorrect
-                            ? 'border-success bg-success/10'
-                            : 'border-danger bg-danger/10'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold">{player.name}</span>
-                          {isCorrect ? (
-                            <Check className="w-5 h-5 text-success" />
-                          ) : (
-                            <X className="w-5 h-5 text-danger" />
-                          )}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {answer ? answer.choice_text : 'No answer'}
-                        </div>
-                        {answer && (
-                          <div className="text-lg font-bold text-foreground">
-                            +{points} points
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <Button
-                  onClick={handleReady}
-                  variant={currentPlayer.ready ? "default" : "outline"}
-                  className={`${
-                    currentPlayer.ready 
-                      ? 'bg-gradient-success shadow-glow-success' 
-                      : 'border-neon-green text-neon-green hover:bg-neon-green hover:text-primary-foreground'
-                  } font-orbitron font-bold`}
-                >
-                  {currentPlayer.ready ? 'Waiting for opponent...' : 'Ready for Next'}
-                </Button>
+              <div className="p-8 text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+                <p className="text-muted-foreground">Loading results...</p>
               </div>
             </Card>
-          </div>
+          ) : (
+            <div className="space-y-6">
+              <Card className="bg-card border-card-border border-2 shadow-glow-primary">
+                <div className="p-8 text-center space-y-6">
+                  <h2 className="text-2xl font-orbitron font-bold text-foreground">
+                    {currentQuestion.question}
+                  </h2>
+                  
+                  <div className="text-xl font-bold">
+                    <span className="text-success">Correct Answer: {currentSolution.correct_answer}</span>
+                  </div>
+                  
+                  {currentSolution.explanation && (
+                    <p className="text-muted-foreground max-w-2xl mx-auto">
+                      {currentSolution.explanation}
+                    </p>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
+                    {players.map((player) => {
+                      const answer = roundAnswers.find(a => a.uid === player.uid && a.question_index === match.current_question_index);
+                      const isCorrect = answer ? answer.choice_text === currentSolution.correct_answer : false;
+                      const points = answer?.points || 0;
+
+                      return (
+                        <div
+                          key={player.uid}
+                          className={`p-4 rounded-lg border-2 ${
+                            isCorrect
+                              ? 'border-success bg-success/10'
+                              : 'border-danger bg-danger/10'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold">{player.name}</span>
+                            {isCorrect ? (
+                              <Check className="w-5 h-5 text-success" />
+                            ) : (
+                              <X className="w-5 h-5 text-danger" />
+                            )}
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {answer ? answer.choice_text : 'No answer'}
+                          </div>
+                          {answer && (
+                            <div className="text-lg font-bold text-foreground">
+                              +{points} points
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <Button
+                    onClick={handleReady}
+                    variant={currentPlayer.ready ? "default" : "outline"}
+                    className={`${
+                      currentPlayer.ready 
+                        ? 'bg-gradient-success shadow-glow-success' 
+                        : 'border-neon-green text-neon-green hover:bg-neon-green hover:text-primary-foreground'
+                    } font-orbitron font-bold`}
+                  >
+                    {currentPlayer.ready ? 'Waiting for opponent...' : 'Ready for Next'}
+                  </Button>
+                </div>
+              </Card>
+            </div>
+          )
         )}
 
         {match.status === 'finished' && (
-          <Card className="bg-card border-card-border border-2 shadow-glow-primary">
-            <div className="p-8 text-center space-y-6">
-              <h2 className="text-4xl font-orbitron font-bold text-foreground">
-                Quiz Complete!
-              </h2>
-              
-              <div className="text-2xl font-bold">
-                {currentPlayer && otherPlayer && currentPlayer.score > otherPlayer.score && (
-                  <span className="text-success">🏆 You Win! 🏆</span>
-                )}
-                {currentPlayer && otherPlayer && currentPlayer.score < otherPlayer.score && (
-                  <span className="text-danger">You Lost!</span>
-                )}
-                {currentPlayer && otherPlayer && currentPlayer.score === otherPlayer.score && (
-                  <span className="text-warning">It's a Tie!</span>
-                )}
+          !currentPlayer || !players.length ? (
+            <Card className="bg-card border-card-border border-2 shadow-glow-primary">
+              <div className="p-8 text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+                <p className="text-muted-foreground">Loading final results...</p>
               </div>
+            </Card>
+          ) : (
+            <Card className="bg-card border-card-border border-2 shadow-glow-primary">
+              <div className="p-8 text-center space-y-6">
+                <h2 className="text-4xl font-orbitron font-bold text-foreground">
+                  Quiz Complete!
+                </h2>
+                
+                <div className="text-2xl font-bold">
+                  {(() => {
+                    const otherPlayer = players.find(p => p.uid !== currentUser?.id);
+                    if (!otherPlayer) return null;
+                    
+                    if (currentPlayer.score > otherPlayer.score) {
+                      return <span className="text-success">🏆 You Win! 🏆</span>;
+                    } else if (currentPlayer.score < otherPlayer.score) {
+                      return <span className="text-danger">You Lost!</span>;
+                    } else {
+                      return <span className="text-warning">It's a Tie!</span>;
+                    }
+                  })()}
+                </div>
 
-              <ScoreBoard players={players} currentUserId={currentUser?.id} final={true} phase={'finished'} />
-              
-              <div className="flex gap-4 justify-center">
-                <Button
-                  onClick={() => window.location.href = '/'}
-                  className="bg-gradient-primary hover:shadow-glow-primary text-primary-foreground font-orbitron font-bold"
-                >
-                  New Quiz
-                </Button>
+                <ScoreBoard players={players} currentUserId={currentUser?.id} final={true} phase={'finished'} />
+                
+                <div className="flex gap-4 justify-center">
+                  <Button
+                    onClick={() => window.location.href = '/'}
+                    className="bg-gradient-primary hover:shadow-glow-primary text-primary-foreground font-orbitron font-bold"
+                  >
+                    New Quiz
+                  </Button>
+                </div>
               </div>
-            </div>
-          </Card>
+            </Card>
+          )
         )}
       </div>
     </div>
