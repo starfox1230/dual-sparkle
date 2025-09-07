@@ -8,8 +8,7 @@ interface ScoreBoardProps {
   currentUserId?: string;
   final?: boolean;
   phase?: string;
-  answers?: Answer[];
-  currentQuestionIndex?: number;
+  playersWhoAnswered?: Set<string>;
 }
 
 export const ScoreBoard = ({
@@ -17,8 +16,7 @@ export const ScoreBoard = ({
   currentUserId,
   final = false,
   phase,
-  answers = [],
-  currentQuestionIndex,
+  playersWhoAnswered = new Set(),
 }: ScoreBoardProps) => {
   if (players.length === 0) return null;
 
@@ -31,10 +29,7 @@ export const ScoreBoard = ({
         const isCurrentUser = player.uid === currentUserId;
         const winner = isWinner(player);
         
-        const hasAnswered = answers.some(
-          (a) =>
-            a.uid === player.uid && a.question_index === currentQuestionIndex
-        );
+        const hasAnswered = playersWhoAnswered.has(player.uid);
 
         return (
           <Card

@@ -27,8 +27,9 @@ const MatchPage = () => {
   const [showQR, setShowQR] = useState(false);
   const [roundProcessed, setRoundProcessed] = useState(false);
   const [nextQuestionTriggered, setNextQuestionTriggered] = useState(false);
+  const [answeringPhaseStartTime, setAnsweringPhaseStartTime] = useState<Date | null>(null);
+  const [playersWhoAnswered, setPlayersWhoAnswered] = useState<Set<string>>(new Set());
   const { toast } = useToast();
-  // The currentQuestionRef was causing a stale closure issue in the subscription. It has been removed.
 
   const currentQuestion = match?.quiz.questions[match.current_question_index];
   const currentSolution = quizSolutions.find(s => s.question_index === match?.current_question_index);
@@ -36,7 +37,7 @@ const MatchPage = () => {
   const currentPlayer = players.find(p => p.uid === currentUser?.id);
   const otherPlayer = players.find(p => p.uid !== currentUser?.id);
   const allReady = players.length === 2 && players.every(p => p.ready);
-  const hasAnswered = currentQuestionAnswers.some(a => a.uid === currentUser?.id && a.question_index === match?.current_question_index);
+  const hasAnswered = currentUser ? playersWhoAnswered.has(currentUser.id) : false;
 
   // Debug logging for answer tracking
   useEffect(() => {
@@ -145,6 +146,20 @@ const MatchPage = () => {
               oldQuestion: prev?.current_question_index,
               newQuestion: newMatch.current_question_index
             });
+            
+            // Track when answering phase starts
+            if (prev?.status !== 'answering' && newMatch.status === 'answering') {
+              console.log('🕒 Answering phase started, tracking timestamps');
+              setAnsweringPhaseStartTime(new Date());
+              setPlayersWhoAnswered(new Set());
+            }
+            
+            // Clear answer tracking when leaving answering phase
+            if (prev?.status === 'answering' && newMatch.status !== 'answering') {
+              setAnsweringPhaseStartTime(null);
+              setPlayersWhoAnswered(new Set());
+            }
+            
             return newMatch;
           });
         }
@@ -169,6 +184,20 @@ const MatchPage = () => {
             const updatedPlayer = payload.new as Player;
             const updated = prev.map(p => p.uid === updatedPlayer.uid ? updatedPlayer : p);
             console.log('🔄 Player updated:', updatedPlayer.name, 'Score:', updatedPlayer.score, 'Ready:', updatedPlayer.ready);
+            
+            // Track if player answered during answering phase
+            if (answeringPhaseStartTime && match?.status === 'answering') {
+              const updateTime = new Date();
+              if (updateTime > answeringPhaseStartTime) {
+                setPlayersWhoAnswered(prev => {
+                  const newSet = new Set(prev);
+                  newSet.add(updatedPlayer.uid);
+                  console.log('✅ Player answered detected via timestamp:', updatedPlayer.name);
+                  return newSet;
+                });
+              }
+            }
+            
             return updated;
           });
         } else {
@@ -248,8 +277,9 @@ const MatchPage = () => {
       console.log('🧹 Clearing answers for new question:', match.current_question_index);
       setAnswers([]);
       setSelectedChoice(null);
-      // Clear current question answers for the new question
       setCurrentQuestionAnswers([]);
+      setPlayersWhoAnswered(new Set());
+      setAnsweringPhaseStartTime(null);
     }
   }, [match?.current_question_index, match?.status]);
 
@@ -296,19 +326,18 @@ const MatchPage = () => {
     }
   }, [match?.status, match?.current_question_index, matchId]);
 
-  // Check if all players have answered - simplified phase transition
+  // Check if all players have answered using timestamp tracking
   const checkAllAnswered = useCallback(() => {
     if (!match || !isHost || match.status !== 'answering') return;
     
-    const currentAnswers = currentQuestionAnswers.filter(a => a.question_index === match.current_question_index);
-    const allAnswered = players.length > 0 && currentAnswers.length === players.length;
+    const allAnswered = players.length > 0 && playersWhoAnswered.size === players.length;
     
     if (allAnswered && !roundProcessed) {
-      console.log('🎯 All players answered! Moving to round_end...');
+      console.log('🎯 All players answered (timestamp-based)! Moving to round_end...');
       setRoundProcessed(true);
       startPhase(match.id, 'round_end');
     }
-  }, [match, currentQuestionAnswers, players, isHost, roundProcessed]);
+  }, [match, playersWhoAnswered, players, isHost, roundProcessed]);
 
   // Simplified answering phase logic - just check for all answered or timer
   useEffect(() => {
@@ -345,10 +374,10 @@ const MatchPage = () => {
     }
   }, [match, isHost, roundProcessed, checkAllAnswered]);
 
-  // Watch for new answers to trigger all-answered check
+  // Watch for players who answered to trigger all-answered check
   useEffect(() => {
     checkAllAnswered();
-  }, [currentQuestionAnswers, checkAllAnswered]);
+  }, [playersWhoAnswered, checkAllAnswered]);
 
   useEffect(() => {
     if (!match || !isHost) return;
@@ -595,8 +624,7 @@ const MatchPage = () => {
         <ScoreBoard
           players={players}
           currentUserId={currentUser?.id}
-          answers={currentQuestionAnswers}
-          currentQuestionIndex={match.current_question_index}
+          playersWhoAnswered={playersWhoAnswered}
           phase={match.status}
         />
 
@@ -653,9 +681,7 @@ const MatchPage = () => {
 
             {match.status === 'answering' && otherPlayer && (
               <div className="text-center text-muted-foreground">
-                {currentQuestionAnswers.some(
-                  a => a.uid === otherPlayer.uid && a.question_index === match.current_question_index
-                )
+                {playersWhoAnswered.has(otherPlayer.uid)
                   ? `✅ ${otherPlayer.name} has answered`
                   : `⏳ Waiting for ${otherPlayer.name}...`}
               </div>
@@ -794,7 +820,7 @@ const MatchPage = () => {
                 )}
               </div>
 
-              <ScoreBoard players={players} currentUserId={currentUser?.id} final={true} answers={currentQuestionAnswers} currentQuestionIndex={match.current_question_index} phase={'finished'} />
+              <ScoreBoard players={players} currentUserId={currentUser?.id} final={true} playersWhoAnswered={playersWhoAnswered} phase={'finished'} />
               
               <div className="flex gap-4 justify-center">
                 <Button
