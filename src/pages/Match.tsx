@@ -358,6 +358,9 @@ const MatchPage = () => {
       return;
     }
 
+    // Skip if already processed this round
+    if (roundProcessed) return;
+
     // Check if all players answered
     checkAllAnswered();
 
@@ -366,7 +369,7 @@ const MatchPage = () => {
     const start = new Date(match.phase_start).getTime();
     const remaining = match.timer_seconds * 1000 - (now - start);
     
-    if (remaining <= 0 && !roundProcessed) {
+    if (remaining <= 0) {
       console.log('⏰ Timer expired, scoring and moving to round_end...');
       setRoundProcessed(true);
       scoreRoundAndEnd(match.id, match.current_question_index);
@@ -375,11 +378,9 @@ const MatchPage = () => {
 
     if (remaining > 0) {
       const timeout = setTimeout(() => {
-        if (!roundProcessed) {
-          console.log('⏰ Timer expired (timeout), scoring and moving to round_end...');
-          setRoundProcessed(true);
-          scoreRoundAndEnd(match.id, match.current_question_index);
-        }
+        console.log('⏰ Timer expired (timeout), scoring and moving to round_end...');
+        setRoundProcessed(true);
+        scoreRoundAndEnd(match.id, match.current_question_index);
       }, remaining);
 
       return () => clearTimeout(timeout);
