@@ -112,9 +112,18 @@ const MatchPage = () => {
         table: 'matches', 
         filter: `id=eq.${matchId}` 
       }, (payload) => {
-        console.log('🔄 Match update:', payload.eventType, payload.new);
+        console.log('🔄 Match realtime update:', payload.eventType, payload.new);
         if (payload.new) {
-          setMatch(payload.new as Match);
+          const newMatch = payload.new as Match;
+          setMatch(prev => {
+            console.log('📱 Match state change:', { 
+              oldStatus: prev?.status, 
+              newStatus: newMatch.status,
+              oldQuestion: prev?.current_question_index,
+              newQuestion: newMatch.current_question_index
+            });
+            return newMatch;
+          });
         }
       })
       .on('postgres_changes', {
@@ -123,20 +132,26 @@ const MatchPage = () => {
         table: 'players',
         filter: `match_id=eq.${matchId}`
       }, (payload) => {
-        console.log('👥 Player update:', payload.eventType, payload.new || payload.old);
+        console.log('👥 Player realtime update:', payload.eventType, payload.new || payload.old);
+        
         if (payload.eventType === 'INSERT' && payload.new) {
           setPlayers(prev => {
             const newPlayer = payload.new as Player;
             if (prev.some(p => p.uid === newPlayer.uid)) return prev;
+            console.log('➕ New player joined:', newPlayer.name);
             return [...prev, newPlayer];
           });
         } else if (payload.eventType === 'UPDATE' && payload.new) {
-          setPlayers(prev => prev.map(p => 
-            p.uid === (payload.new as Player).uid ? payload.new as Player : p
-          ));
+          setPlayers(prev => {
+            const updatedPlayer = payload.new as Player;
+            const updated = prev.map(p => p.uid === updatedPlayer.uid ? updatedPlayer : p);
+            console.log('🔄 Player updated:', updatedPlayer.name, 'Score:', updatedPlayer.score, 'Ready:', updatedPlayer.ready);
+            return updated;
+          });
+        } else {
+          // Fallback: refetch data for any other changes
+          fetchData();
         }
-        // Also refetch to ensure consistency
-        fetchData();
       })
       .on('postgres_changes', {
         event: '*',
@@ -144,20 +159,28 @@ const MatchPage = () => {
         table: 'answers',
         filter: `match_id=eq.${matchId}`
       }, (payload) => {
-        console.log('💬 Answer update:', payload.eventType, payload.new);
+        console.log('💬 Answer realtime update:', payload.eventType, payload.new);
+        
         if (payload.eventType === 'INSERT' && payload.new) {
           const newAnswer = payload.new as Answer;
           setAnswers(prev => {
             if (prev.some(a => a.uid === newAnswer.uid && a.question_index === newAnswer.question_index)) {
               return prev;
             }
+            const playerName = players.find(p => p.uid === newAnswer.uid)?.name || 'Unknown';
+            console.log('➕ New answer received from', playerName, ':', newAnswer.choice_text);
             return [...prev, newAnswer];
           });
         } else if (payload.eventType === 'UPDATE' && payload.new) {
-          setAnswers(prev => prev.map(a => 
-            a.uid === (payload.new as Answer).uid && a.question_index === (payload.new as Answer).question_index 
-              ? payload.new as Answer : a
-          ));
+          setAnswers(prev => {
+            const updatedAnswer = payload.new as Answer;
+            const updated = prev.map(a => 
+              a.uid === updatedAnswer.uid && a.question_index === updatedAnswer.question_index 
+                ? updatedAnswer : a
+            );
+            console.log('🔄 Answer updated:', updatedAnswer.uid, 'Correct:', updatedAnswer.is_correct);
+            return updated;
+          });
         }
       })
       .subscribe();
@@ -181,31 +204,34 @@ const MatchPage = () => {
     setSelectedChoice(null);
   }, [match?.current_question_index]);
 
-  // Clear answers when a new question is revealed to avoid using stale data
+  // Clear answers when a new question is revealed and fetch fresh quiz solutions
   useEffect(() => {
     if (match?.status === 'question_reveal') {
+      console.log('🧹 Clearing answers for new question:', match.current_question_index);
       setAnswers([]);
+      
+      // Refresh quiz solutions for hosts when new questions start
+      if (isHost && matchId) {
+        console.log('🔑 Refreshing quiz solutions for new question...');
+        getQuizSolutions(matchId)
+          .then(solutions => {
+            setQuizSolutions(solutions);
+            console.log('✅ Quiz solutions refreshed:', solutions.length, 'questions');
+          })
+          .catch(error => {
+            console.error('❌ Failed to refresh quiz solutions:', error);
+          });
+      }
     }
-  }, [match?.current_question_index, match?.status]);
+  }, [match?.current_question_index, match?.status, isHost, matchId]);
 
-  // Reset ready state when entering round end
+  // Reset round processed state when entering new phases
   useEffect(() => {
-    if (match?.status === 'round_end') {
-      // Reset ready state in database for all players
-      const resetReadyStates = async () => {
-        if (players.length > 0) {
-          for (const player of players) {
-            await supabase
-              .from('players')
-              .update({ ready: false })
-              .eq('match_id', match.id)
-              .eq('uid', player.uid);
-          }
-        }
-      };
-      resetReadyStates();
+    if (match?.status === 'question_reveal' || match?.status === 'answering') {
+      setRoundProcessed(false);
+      console.log('🔄 Reset round processed state for phase:', match.status);
     }
-  }, [match?.status, match?.id]);
+  }, [match?.status, match?.current_question_index]);
 
   const revealAnswers = useCallback(async () => {
     if (!match || !currentQuestion || !currentSolution || roundProcessed) return;
@@ -295,19 +321,28 @@ const MatchPage = () => {
 
     if (roundProcessed) return;
     
+    // Make sure we have quiz solutions loaded before processing
+    if (!currentSolution) {
+      console.log('⏳ Waiting for quiz solutions to load...');
+      return;
+    }
+    
     // Check if all players have answered
     const currentAnswers = answers.filter(
       a => a.question_index === match.current_question_index
     );
-    console.log(`Checking answers: ${currentAnswers.length}/${players.length} players answered`);
-    console.log('Current answers:', currentAnswers.map(a => ({ uid: a.uid, choice: a.choice_text })));
-    console.log('Players:', players.map(p => ({ uid: p.uid, name: p.name })));
+    console.log(`📊 Answer check: ${currentAnswers.length}/${players.length} players answered`);
+    console.log('📝 Current answers:', currentAnswers.map(a => ({ 
+      player: players.find(p => p.uid === a.uid)?.name || a.uid, 
+      choice: a.choice_text 
+    })));
+    console.log('👥 Players in match:', players.map(p => ({ uid: p.uid, name: p.name })));
     
     const allAnswered = players.length > 0 && currentAnswers.length === players.length;
 
     // Immediately proceed to round end when all players have answered
     if (allAnswered) {
-      console.log('All players answered, revealing answers');
+      console.log('🎯 All players answered! Starting reveal process...');
       setRoundProcessed(true);
       revealAnswers();
       return;
@@ -319,6 +354,7 @@ const MatchPage = () => {
     
     if (remaining <= 0) {
       if (!roundProcessed) {
+        console.log('⏰ Timer expired, revealing answers...');
         setRoundProcessed(true);
         revealAnswers();
       }
@@ -326,12 +362,13 @@ const MatchPage = () => {
     }
 
     const timeout = setTimeout(() => {
+      console.log('⏰ Timer expired (timeout), revealing answers...');
       setRoundProcessed(true);
       revealAnswers();
     }, remaining);
 
     return () => clearTimeout(timeout);
-  }, [match, answers, players, isHost, roundProcessed, revealAnswers]);
+  }, [match, answers, players, isHost, roundProcessed, revealAnswers, currentSolution]);
 
   useEffect(() => {
     if (!match || !isHost) return;
