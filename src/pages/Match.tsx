@@ -101,7 +101,7 @@ const MatchPage = () => {
 
     fetchData();
 
-    // Set up realtime subscriptions
+    // Set up realtime subscriptions with better state management
     const matchChannel = supabase
       .channel(`match:${matchId}`)
       .on('postgres_changes', { 
@@ -110,6 +110,7 @@ const MatchPage = () => {
         table: 'matches', 
         filter: `id=eq.${matchId}` 
       }, (payload) => {
+        console.log('🔄 Match update:', payload.eventType, payload.new);
         if (payload.new) {
           setMatch(payload.new as Match);
         }
@@ -119,7 +120,20 @@ const MatchPage = () => {
         schema: 'public',
         table: 'players',
         filter: `match_id=eq.${matchId}`
-      }, () => {
+      }, (payload) => {
+        console.log('👥 Player update:', payload.eventType, payload.new || payload.old);
+        if (payload.eventType === 'INSERT' && payload.new) {
+          setPlayers(prev => {
+            const newPlayer = payload.new as Player;
+            if (prev.some(p => p.uid === newPlayer.uid)) return prev;
+            return [...prev, newPlayer];
+          });
+        } else if (payload.eventType === 'UPDATE' && payload.new) {
+          setPlayers(prev => prev.map(p => 
+            p.uid === (payload.new as Player).uid ? payload.new as Player : p
+          ));
+        }
+        // Also refetch to ensure consistency
         fetchData();
       })
       .on('postgres_changes', {
@@ -128,16 +142,20 @@ const MatchPage = () => {
         table: 'answers',
         filter: `match_id=eq.${matchId}`
       }, (payload) => {
-        console.log('Real-time answer update:', payload);
-        if (payload.new) {
+        console.log('💬 Answer update:', payload.eventType, payload.new);
+        if (payload.eventType === 'INSERT' && payload.new) {
           const newAnswer = payload.new as Answer;
-          console.log('Adding answer to state:', newAnswer);
           setAnswers(prev => {
-            const filtered = prev.filter(a => !(a.uid === newAnswer.uid && a.question_index === newAnswer.question_index));
-            const updated = [...filtered, newAnswer];
-            console.log('Updated answers state:', updated);
-            return updated;
+            if (prev.some(a => a.uid === newAnswer.uid && a.question_index === newAnswer.question_index)) {
+              return prev;
+            }
+            return [...prev, newAnswer];
           });
+        } else if (payload.eventType === 'UPDATE' && payload.new) {
+          setAnswers(prev => prev.map(a => 
+            a.uid === (payload.new as Answer).uid && a.question_index === (payload.new as Answer).question_index 
+              ? payload.new as Answer : a
+          ));
         }
       })
       .subscribe();
@@ -190,93 +208,80 @@ const MatchPage = () => {
   const revealAnswers = useCallback(async () => {
     if (!match || !currentQuestion) return;
 
+    console.log('🎯 Starting answer reveal and scoring process');
+    
     try {
-      // Update local state so the round end screen persists until players confirm
-      setPlayers(prev =>
-        prev.map(p => {
-          const answer = answers.find(a => a.uid === p.uid && a.question_index === match.current_question_index);
-          const isCorrect = answer ? answer.choice_text === currentQuestion.correctAnswer : false;
-          const points = isCorrect ? 1 : 0;
-          return { ...p, score: (p.score || 0) + points, ready: false };
-        })
-      );
-      setAnswers(prev =>
-        prev.map(a => {
-          if (a.question_index !== match.current_question_index) return a;
-          const isCorrect = a.choice_text === currentQuestion.correctAnswer;
-          const points = isCorrect ? 1 : 0;
-          return { ...a, is_correct: isCorrect, points };
-        })
-      );
-
-      // Optimistically update match status so the timer stops immediately
-      setMatch(prev => prev ? { ...prev, status: 'round_end', phase_start: new Date().toISOString() } : prev);
-
+      // First transition to round_end phase
       await startPhase(match.id, 'round_end');
+      console.log('✅ Phase transitioned to round_end');
       
       const currentAnswers = answers.filter(a => a.question_index === match.current_question_index);
-      console.log('Processing answers for scoring:', currentAnswers);
+      console.log('📝 Processing answers:', currentAnswers.map(a => ({ 
+        player: players.find(p => p.uid === a.uid)?.name, 
+        choice: a.choice_text, 
+        correct: currentQuestion.correctAnswer 
+      })));
 
-      // Update answer correctness and scores individually
+      // Process answers and calculate scores
       for (const answer of currentAnswers) {
         const isCorrect = answer.choice_text === currentQuestion.correctAnswer;
         const points = isCorrect ? 1 : 0;
+        const player = players.find(p => p.uid === answer.uid);
+        
+        console.log(`⚡ ${player?.name}: "${answer.choice_text}" - ${isCorrect ? 'CORRECT' : 'WRONG'} (${points} points)`);
 
-        // Update the answer with correctness info
+        // Update answer correctness
         const { error: ansErr } = await supabase
           .from('answers')
           .update({ is_correct: isCorrect, points })
           .eq('match_id', match.id)
           .eq('uid', answer.uid)
           .eq('question_index', match.current_question_index);
-        if (ansErr) console.error('Answer update error:', ansErr);
+        
+        if (ansErr) {
+          console.error('❌ Answer update failed:', ansErr);
+        } else {
+          console.log('✅ Answer correctness updated');
+        }
 
-        // Find the player and update their score
-        const player = players.find(p => p.uid === answer.uid);
-        if (player) {
+        // Update player score if they got points
+        if (player && points > 0) {
           const newScore = (player.score || 0) + points;
-          console.log(`Updating score for ${player.name}: ${player.score} + ${points} = ${newScore}`);
+          console.log(`🏆 Updating ${player.name}: ${player.score} + ${points} = ${newScore}`);
           
-          // Update player score directly (this will work for the current user due to RLS)
-          const { error: playerErr } = await supabase
+          const { error: scoreErr } = await supabase
             .from('players')
-            .update({ score: newScore, ready: false })
+            .update({ score: newScore })
             .eq('match_id', match.id)
             .eq('uid', answer.uid);
           
-          if (playerErr) {
-            console.error('Player score update error:', playerErr);
-            // If direct update fails (due to RLS), try the function approach for host
-            if (isHost) {
-              console.log('Trying function approach for host...');
-              const { error: funcErr } = await supabase.rpc('update_player_scores', {
-                p_match_id: match.id,
-                p_scores: [{ uid: player.uid, score: newScore, ready: false }]
-              });
-              if (funcErr) console.error('Function update error:', funcErr);
-            }
+          if (scoreErr) {
+            console.error(`❌ Score update failed for ${player.name}:`, scoreErr);
           } else {
-            console.log('Score update successful for', player.name);
+            console.log(`✅ Score updated for ${player.name}`);
           }
         }
       }
 
-      // Reset ready state for players who didn't answer
+      // Reset ready state for all players
+      console.log('🔄 Resetting ready states...');
       for (const player of players) {
-        if (!currentAnswers.some(a => a.uid === player.uid)) {
-          console.log(`Resetting ready state for ${player.name} (no answer)`);
-          const { error: readyErr } = await supabase
-            .from('players')
-            .update({ ready: false })
-            .eq('match_id', match.id)
-            .eq('uid', player.uid);
-          if (readyErr) console.error('Ready reset error:', readyErr);
+        const { error: readyErr } = await supabase
+          .from('players')
+          .update({ ready: false })
+          .eq('match_id', match.id)
+          .eq('uid', player.uid);
+        
+        if (readyErr) {
+          console.error(`❌ Ready reset failed for ${player.name}:`, readyErr);
         }
       }
+
+      console.log('🎉 Answer reveal and scoring complete!');
     } catch (error) {
-      console.error('Reveal answers error:', error);
+      console.error('💥 Reveal answers error:', error);
     }
-  }, [match, currentQuestion, answers, players]);
+  }, [match, currentQuestion, answers, players, isHost]);
 
   useEffect(() => {
     if (!match || !isHost) return;
