@@ -9,6 +9,7 @@ interface Answer {
   uid: string;
   choice_text: string;
   question_index: number;
+  submitted_at: string;
 }
 
 interface QuizSolution {
@@ -62,10 +63,10 @@ Deno.serve(async (req) => {
 
     console.log(`🔢 Scoring round for match ${matchId}, question ${questionIndex}`)
 
-    // Verify user is host of the match
+    // Verify user is host of the match and get timing info
     const { data: match, error: matchError } = await supabase
       .from('matches')
-      .select('host_uid')
+      .select('host_uid, phase_start, timer_seconds')
       .eq('id', matchId)
       .single()
 
@@ -80,7 +81,7 @@ Deno.serve(async (req) => {
     // Get all answers for this question
     const { data: answers, error: answersError } = await supabase
       .from('answers')
-      .select('uid, choice_text, question_index, is_correct')
+      .select('uid, choice_text, question_index, is_correct, submitted_at')
       .eq('match_id', matchId)
       .eq('question_index', questionIndex)
 
@@ -122,14 +123,26 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to fetch players: ${playersError.message}`)
     }
 
-    // Calculate scores
+    // Calculate scores with time-based multiplier
+    const phaseStartTime = new Date(match.phase_start).getTime()
+    const timerSeconds = match.timer_seconds
+    
     const scoreUpdates = players.map((player: Player) => {
       const answer = answers?.find((a: Answer) => a.uid === player.uid)
       const isCorrect = answer?.choice_text === solutions.correct_answer
-      const points = isCorrect ? 1 : 0
+      
+      let points = 0
+      if (isCorrect && answer) {
+        // Calculate seconds remaining when answer was submitted
+        const submittedTime = new Date(answer.submitted_at).getTime()
+        const elapsedSeconds = (submittedTime - phaseStartTime) / 1000
+        const secondsRemaining = Math.max(0, timerSeconds - elapsedSeconds)
+        points = Math.round(secondsRemaining)
+      }
+      
       const newScore = player.score + points
 
-      console.log(`Player ${player.uid}: ${answer?.choice_text} (${isCorrect ? 'correct' : 'incorrect'}) - Score: ${player.score} + ${points} = ${newScore}`)
+      console.log(`Player ${player.uid}: ${answer?.choice_text} (${isCorrect ? 'correct' : 'incorrect'}) - Seconds remaining: ${points} - Score: ${player.score} + ${points} = ${newScore}`)
 
       return {
         uid: player.uid,
@@ -152,11 +165,19 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Update answer records with correct/incorrect status and points
+    // Update answer records with correct/incorrect status and time-based points
     if (answers) {
       for (const answer of answers) {
         const isCorrect = answer.choice_text === solutions.correct_answer
-        const points = isCorrect ? 1 : 0
+        
+        let points = 0
+        if (isCorrect) {
+          // Calculate seconds remaining when answer was submitted
+          const submittedTime = new Date(answer.submitted_at).getTime()
+          const elapsedSeconds = (submittedTime - phaseStartTime) / 1000
+          const secondsRemaining = Math.max(0, timerSeconds - elapsedSeconds)
+          points = Math.round(secondsRemaining)
+        }
 
         const { error: answerUpdateError } = await supabase
           .from('answers')
