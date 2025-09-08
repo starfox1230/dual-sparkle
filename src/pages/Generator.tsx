@@ -12,7 +12,10 @@ import { Zap, Gamepad2, Users } from 'lucide-react';
 const Generator = () => {
   const [quizJson, setQuizJson] = useState('');
   const [hostName, setHostName] = useState('');
-  const [timerSeconds, setTimerSeconds] = useState(15);
+
+  // ✅ CHANGE: keep the timer as a string while the user types, so deleting is allowed
+  const [timerSeconds, setTimerSeconds] = useState<string>('15');
+
   const [isCreating, setIsCreating] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -21,19 +24,11 @@ const Generator = () => {
     try {
       const quiz = JSON.parse(jsonStr);
       
-      if (!quiz.quizName || !Array.isArray(quiz.questions)) {
-        return null;
-      }
-      
+      if (!quiz.quizName || !Array.isArray(quiz.questions)) return null;
       for (const q of quiz.questions) {
-        if (!q.question || !Array.isArray(q.options) || !q.correctAnswer) {
-          return null;
-        }
-        if (q.options.length < 2 || !q.options.includes(q.correctAnswer)) {
-          return null;
-        }
+        if (!q.question || !Array.isArray(q.options) || !q.correctAnswer) return null;
+        if (q.options.length < 2 || !q.options.includes(q.correctAnswer)) return null;
       }
-      
       return quiz;
     } catch {
       return null;
@@ -60,9 +55,31 @@ const Generator = () => {
       return;
     }
 
+    // ✅ CHANGE: convert to number *here*, not during typing
+    const secs = parseInt(timerSeconds, 10);
+
+    // ✅ CHANGE: validate empty/invalid and range here (instead of auto-forcing 15)
+    if (Number.isNaN(secs)) {
+      toast({
+        title: "Timer Required",
+        description: "Please enter a number of seconds for the timer.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (secs < 5 || secs > 60) {
+      toast({
+        title: "Invalid Timer",
+        description: "Timer must be between 5 and 60 seconds.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsCreating(true);
     try {
-      const match = await createMatch(quiz, hostName, timerSeconds);
+      // ✅ CHANGE: pass the parsed number
+      const match = await createMatch(quiz, hostName, secs);
       toast({
         title: "Match Created!",
         description: "Redirecting to match lobby...",
@@ -147,10 +164,25 @@ const Generator = () => {
                   min="5"
                   max="60"
                   placeholder="Timer seconds"
+                  // ✅ CHANGE: bind the raw string; allow '' while typing
                   value={timerSeconds}
-                  onChange={(e) => setTimerSeconds(Number(e.target.value) || 15)}
+                  onChange={(e) => {
+                    // ✅ CHANGE: no auto-fallback; just mirror what the user typed
+                    setTimerSeconds(e.target.value);
+                  }}
+                  // (Optional) If you want to auto-clamp when leaving the field, uncomment:
+                  // onBlur={() => {
+                  //   if (timerSeconds === '') return; // allow empty until submit
+                  //   let n = parseInt(timerSeconds, 10);
+                  //   if (Number.isNaN(n)) n = 15;
+                  //   n = Math.max(5, Math.min(60, n));
+                  //   setTimerSeconds(String(n));
+                  // }}
+                  inputMode="numeric"
                   className="bg-input border-input-border text-foreground"
                 />
+                {/* (Optional) helper text */}
+                {/* <p className="text-xs text-muted-foreground mt-1">Enter 5–60</p> */}
               </div>
               
               <div>
