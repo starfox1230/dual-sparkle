@@ -14,6 +14,7 @@ create table if not exists matches (
   current_question_index integer not null default 0,
   phase_start timestamptz not null default now(),
   timer_seconds integer not null default 30,
+  round_scored boolean not null default false,
   is_public boolean not null default true,
   created_at timestamptz not null default now()
 );
@@ -148,7 +149,8 @@ returns void language sql security definer as $$
   update matches
      set status = p_status,
          phase_start = now(),
-         current_question_index = coalesce(p_qindex, current_question_index)
+         current_question_index = coalesce(p_qindex, current_question_index),
+         round_scored = false
    where id = p_match_id;
 $$;
 
