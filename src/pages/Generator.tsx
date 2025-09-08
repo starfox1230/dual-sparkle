@@ -118,17 +118,17 @@ const Generator = () => {
     // so we keep the instructions consistent with that.
     return `Based *solely* on the attached source (PDF, YouTube video, or pasted text), ${difficultyText}
 
-Return the result as a **single JSON object** with exactly these keys:
-1. "quizName": a short title (e.g., "Chapter 5: Cell Division")
-2. "questions": an array of question objects
+The entire output MUST be a single JSON object. This object must contain two properties:
+1. "quizName": A short, descriptive title for the quiz (e.g., "Chapter 5: Cell Division").
+2. "questions": A JavaScript array of question objects.
 
-Each question object must include **exactly**:
-- "question": the question stem
-- "options": an array of **exactly four** distinct answer strings
-- "correctAnswer": one string that exactly matches one entry in "options"
-- "explanation": a brief, clear rationale referencing the source
+For each question object in the "questions" array, include exactly these four properties (use straight double-quotes around every key and string value). If any string value itself needs to contain a double-quote character, ensure it is properly escaped with a backslash (e.g., \\"example of an internal quote\\").
+- "question": the question stem.
+- "options": an array of **exactly four** distinct answer strings.
+- "correctAnswer": the one option that is correct (must match exactly one entry in "options").
+- "explanation": a brief, clear rationale citing the source material.
 
-Example format:
+Format the entire output as a single JSON object, like this example:
 
 {
   "quizName": "Sample Science Quiz",
@@ -138,11 +138,17 @@ Example format:
       "options": ["Option A", "Option B", "Correct Option C", "Option D"],
       "correctAnswer": "Correct Option C",
       "explanation": "Brief explanation based on the document content."
+    },
+    {
+      "question": "Another question text?",
+      "options": ["Choice 1", "Choice 2", "Choice 3", "Correct Choice 4"],
+      "correctAnswer": "Correct Choice 4",
+      "explanation": "Another explanation referencing the source."
     }
   ]
 }
 
-**Do not** include any extra commentary or markdown fences. Output **only** the JSON object.`;
+Do not include any introductory text, concluding remarks, or markdown formatting like \`\`\`javascript before or after the array. Do not include any quotation marks within the questions or answer choices. Do not emphasize extraneous details, like the exact minute or page number something was said. Just output the raw JavaScript array structure starting with \`[\` and ending with \`]\`.`;
   }, [difficulty, promptTemplates, questionCount]);
 
   const handleCopyPrompt = async () => {
