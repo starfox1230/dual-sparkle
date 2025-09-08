@@ -37,6 +37,9 @@ const MatchPage = () => {
   // Removed answeringPhaseStartTime and playersWhoAnswered - using player.answered instead
   const { toast } = useToast();
 
+  // 🆕 NEW: client-side mutex to prevent double scoring calls from this browser tab
+  const scoringRef = useRef(false);
+
   // --- USEMEMO FOR EFFICIENT AND STABLE DATA ACCESS ---
   const currentQuestion = useMemo(() => {
     if (!quizData || !match) return null;
@@ -358,27 +361,31 @@ const MatchPage = () => {
     }
   }, [match?.status, match?.current_question_index, matchId]);
 
-  // Score the round and transition to round_end
-  const scoreRoundAndEnd = useCallback(async (matchId: string, questionIndex: number) => {
+  // 🔧 CHANGED: score the round WITHOUT flipping phase on the client.
+  // The server function now flips to 'round_end'. Also wrapped in a mutex.
+  const scoreRoundAndEnd = useCallback(async (mid: string, qIndex: number) => {
+    // 🆕 NEW: client-side guard (prevents rapid double calls from this tab)
+    if (scoringRef.current) return;
+    scoringRef.current = true;
     try {
       console.log('🔢 Triggering server-side scoring...');
       const { data, error } = await supabase.functions.invoke('score-round', {
-        body: { matchId, questionIndex }
+        body: { matchId: mid, questionIndex: qIndex }
       });
-      
       if (error) {
         console.error('Scoring error:', error);
         throw error;
       }
-      
       console.log('✅ Scoring completed:', data);
-      await startPhase(matchId, 'round_end');
+      // ❗️Do NOT call startPhase(mid, 'round_end') here.
+      // The Edge Function now sets matches.status='round_end' itself.
     } catch (error) {
       console.error('Failed to score round:', error);
-      // Fallback to just changing phase without scoring
-      await startPhase(matchId, 'round_end');
+      // No client fallback to startPhase — server is the single source of truth.
+    } finally {
+      scoringRef.current = false;
     }
-  }, []);
+  }, []); // scoringRef is a ref; safe to omit from deps
 
   // Check if all players have answered using player.answered field
   const checkAllAnswered = useCallback(() => {
@@ -387,7 +394,7 @@ const MatchPage = () => {
     const allAnswered = players.length > 0 && players.every(p => p.answered);
     
     if (allAnswered && !roundProcessed) {
-      console.log('🎯 All players answered! Scoring and moving to round_end...');
+      console.log('🎯 All players answered! Scoring...');
       setRoundProcessed(true);
       scoreRoundAndEnd(match.id, match.current_question_index);
     }
@@ -400,39 +407,42 @@ const MatchPage = () => {
       return;
     }
 
-    // Skip if already processed this round
-    if (roundProcessed) return;
+    // Skip if already processed this round OR a scoring call is in flight
+    if (roundProcessed || scoringRef.current) return;
 
-    // Check if all players answered
+    // Check if all players answered (fast path)
     checkAllAnswered();
 
-    // Set timer for automatic transition
+    // Set timer for automatic transition (slow path)
     const now = Date.now();
     const start = new Date(match.phase_start).getTime();
     const remaining = match.timer_seconds * 1000 - (now - start);
     
     if (remaining <= 0) {
-      console.log('⏰ Timer expired, scoring and moving to round_end...');
+      console.log('⏰ Timer expired, scoring...');
       setRoundProcessed(true);
       scoreRoundAndEnd(match.id, match.current_question_index);
       return;
     }
 
-    if (remaining > 0) {
-      const timeout = setTimeout(() => {
-        console.log('⏰ Timer expired (timeout), scoring and moving to round_end...');
+    const timeout = setTimeout(() => {
+      if (!roundProcessed && !scoringRef.current) {
+        console.log('⏰ Timer expired (timeout), scoring...');
         setRoundProcessed(true);
         scoreRoundAndEnd(match.id, match.current_question_index);
-      }, remaining);
+      }
+    }, remaining);
 
-      return () => clearTimeout(timeout);
-    }
-  }, [match, isHost, roundProcessed, checkAllAnswered]);
+    return () => clearTimeout(timeout);
+  }, [match, isHost, roundProcessed, checkAllAnswered, scoreRoundAndEnd]);
 
-  // Watch for player answer status changes to trigger all-answered check
+  // 🔧 CHANGED: Keep this watcher so scoring can happen immediately when both answer,
+  // but guard it so it won't race with the timer effect or double-trigger.
   useEffect(() => {
+    if (!match || !isHost || match.status !== 'answering') return;
+    if (roundProcessed || scoringRef.current) return; // 🛡️ guard
     checkAllAnswered();
-  }, [players, checkAllAnswered]);
+  }, [players, match, isHost, roundProcessed, checkAllAnswered]);
 
   useEffect(() => {
     if (!match || !isHost) return;
