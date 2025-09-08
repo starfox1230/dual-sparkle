@@ -40,9 +40,7 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
       {
-        auth: {
-          persistSession: false,
-        },
+        auth: { persistSession: false },
       }
     )
 
@@ -89,17 +87,24 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to fetch answers: ${answersError.message}`)
     }
 
-    // Check if this round has already been scored
-    if (answers && answers.length > 0 && answers[0].is_correct !== null) {
-      console.log(`⚠️ Question ${questionIndex} already scored, skipping duplicate scoring`)
+    // ---- NEW: Idempotency lock per (match_id, question_index) ----
+    const { error: lockErr } = await supabase
+      .from('scored_rounds')
+      .insert({ match_id: matchId, question_index: questionIndex })
+      .select()
+      .single();
+
+    if ((lockErr as any)?.code === '23505') {
+      console.log(`⚠️ Already scored q${questionIndex} for match ${matchId}`);
       return new Response(
         JSON.stringify({ success: true, message: 'Already scored' }),
-        { 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 200 
-        }
-      )
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      );
     }
+    if (lockErr) {
+      throw new Error(`Failed to claim round lock: ${lockErr.message ?? lockErr}`);
+    }
+    // --------------------------------------------------------------
 
     // Get the correct answer
     const { data: solutions, error: solutionsError } = await supabase
@@ -130,13 +135,13 @@ Deno.serve(async (req) => {
       
       // Calculate time-based points
       let points = 0
-      if (isCorrect && answer.submitted_at && match.phase_start) {
+      if (isCorrect && answer?.submitted_at && match.phase_start) {
         const elapsedSeconds = (new Date(answer.submitted_at).getTime() - new Date(match.phase_start).getTime()) / 1000
         const secondsRemaining = Math.max(0, match.timer_seconds - elapsedSeconds)
         points = Math.round(secondsRemaining)
       }
       
-      const newScore = player.score + points
+      const newScore = (player.score ?? 0) + points
 
       console.log(`Player ${player.uid}: ${answer?.choice_text} (${isCorrect ? 'correct' : 'incorrect'}) - Score: ${player.score} + ${points} = ${newScore}`)
 
@@ -147,7 +152,7 @@ Deno.serve(async (req) => {
       }
     })
 
-    // Update all player scores in a single transaction
+    // Update all player scores in a single transaction (loop)
     for (const update of scoreUpdates) {
       const { error: updateError } = await supabase
         .from('players')
@@ -186,6 +191,12 @@ Deno.serve(async (req) => {
         }
       }
     }
+
+    // NEW: Flip to round_end ON THE SERVER
+    await supabase
+      .from('matches')
+      .update({ status: 'round_end', phase_start: new Date().toISOString() })
+      .eq('id', matchId);
 
     console.log(`✅ Scoring complete for match ${matchId}, question ${questionIndex}`)
 
