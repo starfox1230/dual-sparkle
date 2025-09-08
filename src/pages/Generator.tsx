@@ -17,7 +17,8 @@ const Generator = () => {
   const [timerSeconds, setTimerSeconds] = useState<string>('15');
 
   // ✅ NEW: Prompt Generator state
-  const [difficulty, setDifficulty] = useState<'elementary' | 'high_school' | 'hard'>('hard');
+  const [difficulty, setDifficulty] = useState<'elementary' | 'high_school' | 'hard'>('high_school');
+
   const [questionCount, setQuestionCount] = useState<string>('10');
   const [showPrompt, setShowPrompt] = useState(false);
 
