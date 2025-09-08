@@ -78,30 +78,6 @@ Deno.serve(async (req) => {
       throw new Error('Only the host can trigger scoring')
     }
 
-    // Attempt to mark this round as scored; abort if already scored
-    const { data: flagData, error: flagError } = await supabase
-      .from('matches')
-      .update({ round_scored: true })
-      .eq('id', matchId)
-      .eq('current_question_index', questionIndex)
-      .eq('round_scored', false)
-      .select('id')
-
-    if (flagError) {
-      throw new Error(`Failed to set round_scored flag: ${flagError.message}`)
-    }
-
-    if (!flagData || flagData.length === 0) {
-      console.log(`⚠️ Question ${questionIndex} already scored, skipping duplicate scoring`)
-      return new Response(
-        JSON.stringify({ success: true, message: 'Already scored' }),
-        {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 200
-        }
-      )
-    }
-
     // Get all answers for this question with timing data
     const { data: answers, error: answersError } = await supabase
       .from('answers')
@@ -111,6 +87,18 @@ Deno.serve(async (req) => {
 
     if (answersError) {
       throw new Error(`Failed to fetch answers: ${answersError.message}`)
+    }
+
+    // Check if this round has already been scored
+    if (answers && answers.length > 0 && answers[0].is_correct !== null) {
+      console.log(`⚠️ Question ${questionIndex} already scored, skipping duplicate scoring`)
+      return new Response(
+        JSON.stringify({ success: true, message: 'Already scored' }),
+        { 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 200 
+        }
+      )
     }
 
     // Get the correct answer

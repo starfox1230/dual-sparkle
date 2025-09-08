@@ -36,7 +36,6 @@ const MatchPage = () => {
   const [preloadRetryCount, setPreloadRetryCount] = useState(0);
   // Removed answeringPhaseStartTime and playersWhoAnswered - using player.answered instead
   const { toast } = useToast();
-  const scoringRef = useRef(false);
 
   // --- USEMEMO FOR EFFICIENT AND STABLE DATA ACCESS ---
   const currentQuestion = useMemo(() => {
@@ -335,7 +334,6 @@ const MatchPage = () => {
   useEffect(() => {
     if (match?.status === 'question_reveal' || match?.status === 'answering') {
       setRoundProcessed(false);
-      scoringRef.current = false;
       console.log('🔄 Reset round processed state for phase:', match.status);
     }
   }, [match?.status, match?.current_question_index]);
@@ -362,19 +360,17 @@ const MatchPage = () => {
 
   // Score the round and transition to round_end
   const scoreRoundAndEnd = useCallback(async (matchId: string, questionIndex: number) => {
-    if (scoringRef.current) return;
-    scoringRef.current = true;
     try {
       console.log('🔢 Triggering server-side scoring...');
       const { data, error } = await supabase.functions.invoke('score-round', {
         body: { matchId, questionIndex }
       });
-
+      
       if (error) {
         console.error('Scoring error:', error);
         throw error;
       }
-
+      
       console.log('✅ Scoring completed:', data);
       await startPhase(matchId, 'round_end');
     } catch (error) {
@@ -390,7 +386,7 @@ const MatchPage = () => {
     
     const allAnswered = players.length > 0 && players.every(p => p.answered);
     
-    if (allAnswered && !roundProcessed && !scoringRef.current) {
+    if (allAnswered && !roundProcessed) {
       console.log('🎯 All players answered! Scoring and moving to round_end...');
       setRoundProcessed(true);
       scoreRoundAndEnd(match.id, match.current_question_index);
@@ -401,7 +397,6 @@ const MatchPage = () => {
   useEffect(() => {
     if (!match || !isHost || match.status !== 'answering') {
       setRoundProcessed(false);
-      scoringRef.current = false;
       return;
     }
 
@@ -417,21 +412,17 @@ const MatchPage = () => {
     const remaining = match.timer_seconds * 1000 - (now - start);
     
     if (remaining <= 0) {
-      if (!scoringRef.current) {
-        console.log('⏰ Timer expired, scoring and moving to round_end...');
-        setRoundProcessed(true);
-        scoreRoundAndEnd(match.id, match.current_question_index);
-      }
+      console.log('⏰ Timer expired, scoring and moving to round_end...');
+      setRoundProcessed(true);
+      scoreRoundAndEnd(match.id, match.current_question_index);
       return;
     }
 
     if (remaining > 0) {
       const timeout = setTimeout(() => {
-        if (!scoringRef.current) {
-          console.log('⏰ Timer expired (timeout), scoring and moving to round_end...');
-          setRoundProcessed(true);
-          scoreRoundAndEnd(match.id, match.current_question_index);
-        }
+        console.log('⏰ Timer expired (timeout), scoring and moving to round_end...');
+        setRoundProcessed(true);
+        scoreRoundAndEnd(match.id, match.current_question_index);
       }, remaining);
 
       return () => clearTimeout(timeout);
