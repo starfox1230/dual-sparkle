@@ -644,7 +644,7 @@ const MatchPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-bg font-roboto">
+    <div style={{ minHeight: "100dvh" }} className="bg-gradient-bg font-roboto">
       <div className="container mx-auto px-4 py-6 max-w-4xl">
         {/* Header */}
         <div className="text-center mb-6">
