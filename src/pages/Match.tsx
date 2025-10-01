@@ -291,41 +291,46 @@ const MatchPage = () => {
     }
   }, [match?.current_question_index, match?.status]);
 
-  // --- IMPROVED PRE-LOADING WITH RETRY LOGIC ---
+  // --- IMPROVED PRE-LOADING WITH RETRY LOGIC (NON-BLOCKING) ---
   useEffect(() => {
     // Pre-load when match starts OR when a new player joins
     if (match && match.status !== 'lobby' && !quizData && match.quiz && matchId) {
       const fetchFullQuizAndSolutions = async () => {
-        console.log('📚 Pre-loading all quiz data and solutions...');
+        console.log('📚 Pre-loading quiz data and solutions (non-blocking)...');
         try {
           // Use the quiz data already available in the match object
           setQuizData(match.quiz);
           console.log(`✅ ${match.quiz.questions.length} questions loaded.`);
 
-          // Fetch all solutions for the match with retry logic
-          const solutions = await getQuizSolutions(matchId);
-          setAllSolutions(solutions);
-          console.log(`✅ ${solutions.length} solutions loaded.`);
-          setPreloadRetryCount(0); // Reset retry count on success
+          // Fetch solutions in background - DON'T block UI if this fails
+          try {
+            const solutions = await getQuizSolutions(matchId);
+            setAllSolutions(solutions);
+            console.log(`✅ ${solutions.length} solutions loaded.`);
+            setPreloadRetryCount(0); // Reset retry count on success
+          } catch (solutionError) {
+            console.warn('⚠️ Solutions pre-load failed (will retry):', solutionError);
+            
+            // Retry up to 5 times with increasing delay, but DON'T block UI
+            if (preloadRetryCount < 5) {
+              const retryDelay = (preloadRetryCount + 1) * 1000;
+              console.log(`🔄 Retrying solutions fetch in ${retryDelay}ms (attempt ${preloadRetryCount + 1}/5)`);
+              
+              setTimeout(() => {
+                setPreloadRetryCount(prev => prev + 1);
+              }, retryDelay);
+            } else {
+              console.error('❌ Solutions pre-load failed after 5 attempts. Will fetch on-demand at round_end.');
+            }
+          }
 
         } catch (error) {
-          console.error('❌ Failed to pre-load quiz data:', error);
-          
-          // Retry up to 3 times with increasing delay
-          if (preloadRetryCount < 3) {
-            const retryDelay = (preloadRetryCount + 1) * 1000;
-            console.log(`🔄 Retrying pre-load in ${retryDelay}ms (attempt ${preloadRetryCount + 1}/3)`);
-            
-            setTimeout(() => {
-              setPreloadRetryCount(prev => prev + 1);
-            }, retryDelay);
-          } else {
-            toast({
-              title: "Loading Error",
-              description: "Could not load quiz data after multiple attempts. Game may not function properly.",
-              variant: "destructive",
-            });
-          }
+          console.error('❌ Critical error loading quiz data:', error);
+          toast({
+            title: "Loading Error",
+            description: "Could not load quiz data. Please refresh the page.",
+            variant: "destructive",
+          });
         }
       };
 
@@ -341,7 +346,7 @@ const MatchPage = () => {
     }
   }, [match?.status, match?.current_question_index]);
 
-  // Fetch answers for round_end display
+  // Fetch answers for round_end display and solutions if missing
   useEffect(() => {
     if (match?.status === 'round_end' && matchId) {
       console.log('🔍 Fetching answers for round display...');
@@ -357,9 +362,25 @@ const MatchPage = () => {
           console.log('✅ Round answers loaded:', roundAnswersData.length, 'answers');
         }
       };
+      
+      // If solutions are missing, fetch them now (on-demand)
+      const fetchSolutionsIfNeeded = async () => {
+        if (!allSolutions.length) {
+          console.log('🔍 Solutions missing at round_end, fetching now...');
+          try {
+            const solutions = await getQuizSolutions(matchId);
+            setAllSolutions(solutions);
+            console.log(`✅ ${solutions.length} solutions fetched on-demand.`);
+          } catch (error) {
+            console.error('❌ Failed to fetch solutions at round_end:', error);
+          }
+        }
+      };
+      
       fetchRoundAnswers();
+      fetchSolutionsIfNeeded();
     }
-  }, [match?.status, match?.current_question_index, matchId]);
+  }, [match?.status, match?.current_question_index, matchId, allSolutions.length]);
 
   // 🔧 CHANGED: score the round WITHOUT flipping phase on the client.
   // The server function now flips to 'round_end'. Also wrapped in a mutex.
@@ -597,8 +618,19 @@ const MatchPage = () => {
   // --- COMPREHENSIVE LOADING STATE FOR THE MAIN CONTENT AREA ---
   const isGameContentLoading = useMemo(() => {
     if (!match) return false; // Don't show loading if match is null
-    return (match.status !== 'lobby' && match.status !== 'finished') && // Only apply in active game phases
-           (!quizData || !allSolutions.length || !currentQuestion);    // Check if our pre-loaded data is ready
+    
+    // For question phases, only require quizData and currentQuestion (NOT solutions)
+    if (match.status === 'question_reveal' || match.status === 'answering') {
+      const loading = !quizData || !currentQuestion;
+      if (!loading && !allSolutions.length) {
+        console.log('📊 Showing question UI without solutions (will load in background)');
+      }
+      return loading;
+    }
+    
+    // For round_end and other phases, keep original behavior
+    return (match.status !== 'lobby' && match.status !== 'finished') && 
+           (!quizData || !currentQuestion);
   }, [match, quizData, allSolutions.length, currentQuestion]);
 
   if (showJoinForm) {
@@ -820,7 +852,7 @@ const MatchPage = () => {
               </div>
             </Card>
           </div>
-        ) : match.status === 'round_end' && currentQuestion && currentSolution ? (
+        ) : match.status === 'round_end' && currentQuestion ? (
           <div className="space-y-6">
               <Card className="bg-card border-card-border border-2 shadow-glow-primary">
                 <div className="p-8 text-center space-y-6">
@@ -828,51 +860,60 @@ const MatchPage = () => {
                     {currentQuestion.question}
                   </h2>
                   
-                  <div className="text-xl font-bold">
-                    <span className="text-success">Correct Answer: {currentSolution.correct_answer}</span>
-                  </div>
-                  
-                  {currentSolution.explanation && (
-                    <p className="text-muted-foreground max-w-2xl mx-auto">
-                      {currentSolution.explanation}
-                    </p>
-                  )}
+                  {currentSolution ? (
+                    <>
+                      <div className="text-xl font-bold">
+                        <span className="text-success">Correct Answer: {currentSolution.correct_answer}</span>
+                      </div>
+                      
+                      {currentSolution.explanation && (
+                        <p className="text-muted-foreground max-w-2xl mx-auto">
+                          {currentSolution.explanation}
+                        </p>
+                      )}
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
-                    {players.map((player) => {
-                      const answer = roundAnswers.find(a => a.uid === player.uid && a.question_index === match.current_question_index);
-                      const isCorrect = answer ? answer.choice_text === currentSolution.correct_answer : false;
-                      const points = answer?.points || 0;
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
+                        {players.map((player) => {
+                          const answer = roundAnswers.find(a => a.uid === player.uid && a.question_index === match.current_question_index);
+                          const isCorrect = answer ? answer.choice_text === currentSolution.correct_answer : false;
+                          const points = answer?.points || 0;
 
-                      return (
-                        <div
-                          key={player.uid}
-                          className={`p-4 rounded-lg border-2 ${
-                            isCorrect
-                              ? 'border-success bg-success/10'
-                              : 'border-danger bg-danger/10'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-semibold">{player.name}</span>
-                            {isCorrect ? (
-                              <Check className="w-5 h-5 text-success" />
-                            ) : (
-                              <X className="w-5 h-5 text-danger" />
-                            )}
-                          </div>
-                          <div className="text-sm text-muted-foreground">
-                            {answer ? answer.choice_text : 'No answer'}
-                          </div>
-                          {answer && (
-                            <div className="text-lg font-bold text-foreground">
-                              +{points} points
+                          return (
+                            <div
+                              key={player.uid}
+                              className={`p-4 rounded-lg border-2 ${
+                                isCorrect
+                                  ? 'border-success bg-success/10'
+                                  : 'border-danger bg-danger/10'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold">{player.name}</span>
+                                {isCorrect ? (
+                                  <Check className="w-5 h-5 text-success" />
+                                ) : (
+                                  <X className="w-5 h-5 text-danger" />
+                                )}
+                              </div>
+                              <div className="text-sm text-muted-foreground">
+                                {answer ? answer.choice_text : 'No answer'}
+                              </div>
+                              {answer && (
+                                <div className="text-lg font-bold text-foreground">
+                                  +{points} points
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex items-center justify-center py-8">
+                      <Zap className="w-8 h-8 text-neon-blue animate-pulse mr-3" />
+                      <p className="text-lg font-orbitron text-muted-foreground">Revealing answer...</p>
+                    </div>
+                  )}
 
                   <Button
                     onClick={handleReady}
