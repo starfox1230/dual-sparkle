@@ -110,6 +110,10 @@ const MatchPage = () => {
 
       if (matchData) {
         setMatch(matchData);
+        // 🛠️ FIX 1: Initialize quiz data immediately if available
+        if (matchData.quiz) {
+          setQuizData(matchData.quiz);
+        }
       }
 
       // Fetch players
@@ -157,6 +161,11 @@ const MatchPage = () => {
         if (payload.new) {
           const newMatch = payload.new as Match;
           setMatch(prev => {
+            // 🛠️ FIX 2: Preserve quiz data if large JSON dropped by Realtime
+            if (prev?.quiz && !newMatch.quiz) {
+              newMatch.quiz = prev.quiz;
+            }
+
             console.log('📱 Match state change:', { 
               oldStatus: prev?.status, 
               newStatus: newMatch.status,
@@ -293,8 +302,9 @@ const MatchPage = () => {
 
   // --- IMPROVED PRE-LOADING WITH RETRY LOGIC (NON-BLOCKING) ---
   useEffect(() => {
-    // Pre-load when match starts OR when a new player joins
-    if (match && match.status !== 'lobby' && !quizData && match.quiz && matchId) {
+    // 🛠️ FIX 3: Load immediately when match.quiz is available (removed !lobby check)
+    // This ensures data is ready before the "Start" button is even clicked.
+    if (match && !quizData && match.quiz && matchId) {
       const fetchFullQuizAndSolutions = async () => {
         console.log('📚 Pre-loading quiz data and solutions (non-blocking)...');
         try {
@@ -336,7 +346,7 @@ const MatchPage = () => {
 
       fetchFullQuizAndSolutions();
     }
-  }, [match?.status, match?.quiz, matchId, quizData, toast, preloadRetryCount]);
+  }, [match, matchId, quizData, toast, preloadRetryCount]);
 
   // Reset round processed state when entering new phases
   useEffect(() => {
