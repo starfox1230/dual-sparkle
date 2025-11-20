@@ -120,10 +120,10 @@ const Generator = () => {
 
 The entire output MUST be a single JSON object. This object must contain two properties:
 1. "quizName": A short, descriptive title for the quiz (e.g., "Chapter 5: Cell Division").
-2. "questions": A JavaScript array of question objects, none of which may contain internal quotation marks like ".
+2. "questions": A JavaScript array of question objects, none of which may contain internal quotation marks.
 
 For each question object in the "questions" array, include exactly these four properties (use straight double-quotes around every key and string value). If any string value itself needs to contain a double-quote character, ensure it is properly escaped with a backslash (e.g., \\"example of an internal quote\\").
-- "question": the question stem.
+- "question": the question stem. It is extremely important that no internal quotation marks are used. Instead, use apostrophes. For example, "What does the "White Cerebellum Sign" on a CT scan indicate?" should be rendered "What does the 'White Cerebellum Sign' on a CT scan indicate?"
 - "options": an array of **exactly four** distinct answer strings.
 - "correctAnswer": the one option that is correct (must match exactly one entry in "options").
 - "explanation": a brief, clear rationale citing the source material.
