@@ -160,24 +160,6 @@ Do not include any introductory text, concluding remarks, or markdown formatting
     }
   };
 
-  const sampleQuiz = {
-    quizName: 'Space Knowledge Quiz',
-    questions: [
-      {
-        question: 'What is the actual closest planet to the Sun?',
-        options: ['Venus', 'Mercury', 'Earth', 'Mars'],
-        correctAnswer: 'Mercury',
-        explanation: 'Mercury is the innermost planet in our solar system.',
-      },
-      {
-        question: 'How many moons does Jupiter have?',
-        options: ['63', '79', '95', '102'],
-        correctAnswer: '95',
-        explanation: 'Jupiter has 95 confirmed moons as of recent discoveries.',
-      },
-    ],
-  };
-
   return (
     <div className="min-h-screen bg-gradient-bg font-roboto">
       <div className="container mx-auto px-4 py-8 max-w-4xl">
@@ -192,80 +174,7 @@ Do not include any introductory text, concluding remarks, or markdown formatting
         </div>
 
         <div className="grid md:grid-cols-2 gap-8">
-          {/* LEFT: Quiz Input */}
-          <Card className="bg-card border-card-border border-2 shadow-glow-primary">
-            <CardHeader>
-              <CardTitle className="font-orbitron text-neon-blue flex items-center gap-2">
-                <Users className="w-5 h-5" />
-                Quiz Setup
-              </CardTitle>
-              <CardDescription>Paste your quiz JSON or use the sample below</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="hostName" className="text-foreground">
-                  Your Name
-                </Label>
-                <Input
-                  id="hostName"
-                  placeholder="Enter your name"
-                  value={hostName}
-                  onChange={(e) => setHostName(e.target.value)}
-                  className="bg-input border-input-border text-foreground"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="timer" className="text-foreground">
-                  Timer Duration (seconds)
-                </Label>
-                <Input
-                  id="timer"
-                  type="number"
-                  min="5"
-                  max="60"
-                  placeholder="Timer seconds"
-                  value={timerSeconds}
-                  onChange={(e) => setTimerSeconds(e.target.value)} // ← no auto-fallback; allow clearing
-                  inputMode="numeric"
-                  className="bg-input border-input-border text-foreground"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="quiz" className="text-foreground">
-                  Quiz JSON
-                </Label>
-                <Textarea
-                  id="quiz"
-                  placeholder="Paste your quiz JSON here..."
-                  value={quizJson}
-                  onChange={(e) => setQuizJson(e.target.value)}
-                  className="min-h-[300px] bg-input border-input-border text-foreground font-mono"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <Button
-                  onClick={() => setQuizJson(JSON.stringify(sampleQuiz, null, 2))}
-                  variant="outline"
-                  className="border-neon-cyan text-neon-cyan hover:bg-neon-cyan hover:text-primary-foreground"
-                >
-                  Load Sample Quiz
-                </Button>
-
-                <Button
-                  onClick={handleCreateMatch}
-                  disabled={isCreating}
-                  className="bg-gradient-primary hover:shadow-glow-primary text-primary-foreground font-orbitron font-bold"
-                >
-                  {isCreating ? 'Creating Match...' : 'Create Match'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* RIGHT: REPLACE the "Quiz Format Guide" card with this Prompt Generator card */}
+          {/* LEFT: AI Prompt Generator */}
           <Card className="bg-card border-card-border border-2 shadow-glow-primary">
             <CardHeader>
               <CardTitle className="font-orbitron text-neon-purple">AI Prompt Generator</CardTitle>
@@ -355,7 +264,71 @@ Do not include any introductory text, concluding remarks, or markdown formatting
               )}
             </CardContent>
           </Card>
-          {/* END replacement */}
+
+          {/* RIGHT: Quiz Input */}
+          <Card className="bg-card border-card-border border-2 shadow-glow-primary">
+            <CardHeader>
+              <CardTitle className="font-orbitron text-neon-blue flex items-center gap-2">
+                <Users className="w-5 h-5" />
+                Quiz Setup
+              </CardTitle>
+              <CardDescription>Paste the generated quiz JSON and configure the match</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="hostName" className="text-foreground">
+                  Your Name
+                </Label>
+                <Input
+                  id="hostName"
+                  placeholder="Enter your name"
+                  value={hostName}
+                  onChange={(e) => setHostName(e.target.value)}
+                  className="bg-input border-input-border text-foreground"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="timer" className="text-foreground">
+                  Timer Duration (seconds)
+                </Label>
+                <Input
+                  id="timer"
+                  type="number"
+                  min="5"
+                  max="60"
+                  placeholder="Timer seconds"
+                  value={timerSeconds}
+                  onChange={(e) => setTimerSeconds(e.target.value)} // ← no auto-fallback; allow clearing
+                  inputMode="numeric"
+                  className="bg-input border-input-border text-foreground"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="quiz" className="text-foreground">
+                  Quiz JSON
+                </Label>
+                <Textarea
+                  id="quiz"
+                  placeholder="Paste your quiz JSON here..."
+                  value={quizJson}
+                  onChange={(e) => setQuizJson(e.target.value)}
+                  className="min-h-[300px] bg-input border-input-border text-foreground font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-3">
+                <Button
+                  onClick={handleCreateMatch}
+                  disabled={isCreating}
+                  className="bg-gradient-primary hover:shadow-glow-primary text-primary-foreground font-orbitron font-bold"
+                >
+                  {isCreating ? 'Creating Match...' : 'Create Match'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
