@@ -963,55 +963,6 @@ const MatchPage = () => {
 
                 <ScoreBoard players={players} currentUserId={currentUser?.id} final={true} phase={'finished'} />
                 
-                {/* Question-by-question breakdown */}
-                {quizData && allSolutions.length > 0 && (
-                  <div className="text-left space-y-3">
-                    <h3 className="text-lg font-orbitron font-bold text-foreground text-center">Your Answers</h3>
-                    <div className="space-y-2 max-h-64 overflow-y-auto">
-                      {quizData.questions.map((question, idx) => {
-                        const myAnswer = answers.find(a => a.uid === currentUser?.id && a.question_index === idx);
-                        const solution = allSolutions.find(s => s.question_index === idx);
-                        const isCorrect = myAnswer?.is_correct ?? false;
-                        
-                        return (
-                          <div 
-                            key={idx}
-                            className={`p-3 rounded-lg border ${
-                              isCorrect 
-                                ? 'border-success/50 bg-success/10' 
-                                : 'border-danger/50 bg-danger/10'
-                            }`}
-                          >
-                            <div className="flex items-start gap-2">
-                              {isCorrect ? (
-                                <Check className="w-5 h-5 text-success shrink-0 mt-0.5" />
-                              ) : (
-                                <X className="w-5 h-5 text-danger shrink-0 mt-0.5" />
-                              )}
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-foreground truncate">
-                                  Q{idx + 1}: {question.question}
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                  {myAnswer ? `Your answer: ${myAnswer.choice_text}` : 'No answer'}
-                                  {!isCorrect && solution && (
-                                    <span className="text-success ml-2">
-                                      (Correct: {solution.correct_answer})
-                                    </span>
-                                  )}
-                                </p>
-                              </div>
-                              {myAnswer?.points != null && myAnswer.points > 0 && (
-                                <span className="text-xs font-bold text-success">+{myAnswer.points}</span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                
                 <div className="flex gap-4 justify-center">
                   <Button
                     onClick={() => window.location.href = '/'}
