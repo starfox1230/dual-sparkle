@@ -191,21 +191,40 @@ export type Database = {
           },
         ]
       }
+      scored_rounds: {
+        Row: {
+          match_id: string
+          question_index: number
+          scored_at: string | null
+        }
+        Insert: {
+          match_id: string
+          question_index: number
+          scored_at?: string | null
+        }
+        Update: {
+          match_id?: string
+          question_index?: number
+          scored_at?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      create_secure_match: {
-        Args:
-          | { p_quiz_data: Json; p_quiz_name: string }
-          | { p_quiz_data: Json; p_quiz_name: string; p_timer_seconds?: number }
-        Returns: string
-      }
-      generate_random_id: {
-        Args: Record<PropertyKey, never>
-        Returns: string
-      }
+      create_secure_match:
+        | { Args: { p_quiz_data: Json; p_quiz_name: string }; Returns: string }
+        | {
+            Args: {
+              p_quiz_data: Json
+              p_quiz_name: string
+              p_timer_seconds?: number
+            }
+            Returns: string
+          }
+      generate_random_id: { Args: never; Returns: string }
       get_quiz_solutions: {
         Args: { p_match_id: string }
         Returns: {
