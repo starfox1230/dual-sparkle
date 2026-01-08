@@ -9,6 +9,7 @@ import type { User } from '@supabase/supabase-js';
 import { useToast } from '@/hooks/use-toast';
 import { Timer } from '@/components/Timer';
 import { ScoreBoard } from '@/components/ScoreBoard';
+import { QuestionReview } from '@/components/QuestionReview';
 import { QRCodeSVG } from 'qrcode.react';
 import { Copy, Users, Crown, Zap, Check, X } from 'lucide-react';
 
@@ -940,7 +941,8 @@ const MatchPage = () => {
               </Card>
             </div>
         ) : match.status === 'finished' ? (
-          <Card className="bg-card border-card-border border-2 shadow-glow-primary">
+          <>
+            <Card className="bg-card border-card-border border-2 shadow-glow-primary">
               <div className="p-8 text-center space-y-6">
                 <h2 className="text-4xl font-orbitron font-bold text-foreground">
                   Quiz Complete!
@@ -973,6 +975,16 @@ const MatchPage = () => {
                 </div>
               </div>
             </Card>
+            
+            {quizData && currentUser && (
+              <QuestionReview
+                quizData={quizData}
+                allSolutions={allSolutions}
+                answers={answers}
+                currentUserId={currentUser.id}
+              />
+            )}
+          </>
         ) : null}
       </div>
     </div>
