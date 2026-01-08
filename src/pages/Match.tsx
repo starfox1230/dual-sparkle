@@ -34,6 +34,7 @@ const MatchPage = () => {
   const [nextQuestionTriggered, setNextQuestionTriggered] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [preloadRetryCount, setPreloadRetryCount] = useState(0);
+  const [reviewFilter, setReviewFilter] = useState<'all' | 'correct' | 'incorrect'>('all');
   // Removed answeringPhaseStartTime and playersWhoAnswered - using player.answered instead
   const { toast } = useToast();
 
@@ -50,6 +51,42 @@ const MatchPage = () => {
     if (!allSolutions.length || !match) return null;
     return allSolutions.find(s => s.question_index === match.current_question_index);
   }, [allSolutions, match?.current_question_index]);
+
+  const questionResults = useMemo(() => {
+    if (!quizData) return [];
+
+    return quizData.questions.map((question, index) => {
+      const answer = roundAnswers.find(
+        (entry) => entry.uid === currentUser?.id && entry.question_index === index
+      );
+      const solution = allSolutions.find((entry) => entry.question_index === index);
+      const userAnswer = answer?.choice_text ?? 'No answer';
+      const correctAnswer = solution?.correct_answer ?? 'Not available';
+      const explanation = solution?.explanation ?? 'No explanation provided.';
+      const isCorrect = Boolean(answer && solution && answer.choice_text === solution.correct_answer);
+
+      return {
+        index,
+        question: question.question,
+        userAnswer,
+        correctAnswer,
+        explanation,
+        isCorrect,
+      };
+    });
+  }, [allSolutions, currentUser?.id, quizData, roundAnswers]);
+
+  const filteredResults = useMemo(() => {
+    if (reviewFilter === 'correct') {
+      return questionResults.filter((result) => result.isCorrect);
+    }
+
+    if (reviewFilter === 'incorrect') {
+      return questionResults.filter((result) => !result.isCorrect);
+    }
+
+    return questionResults;
+  }, [questionResults, reviewFilter]);
   const isHost = currentUser && match && currentUser.id === match.host_uid;
   const currentPlayer = players.find(p => p.uid === currentUser?.id);
   const otherPlayer = players.find(p => p.uid !== currentUser?.id);
@@ -625,6 +662,33 @@ const MatchPage = () => {
     });
   };
 
+  const copyReviewItems = useCallback((items: typeof questionResults, label: string) => {
+    if (!items.length) {
+      toast({
+        title: "Nothing to copy",
+        description: `No ${label.toLowerCase()} answers to copy yet.`,
+      });
+      return;
+    }
+
+    const text = items
+      .map((item) => {
+        return [
+          `Question ${item.index + 1}: ${item.question}`,
+          `Your answer: ${item.userAnswer}`,
+          `Correct answer: ${item.correctAnswer}`,
+          `Explanation: ${item.explanation}`,
+        ].join('\n');
+      })
+      .join('\n\n');
+
+    navigator.clipboard.writeText(text);
+    toast({
+      title: "Copied to clipboard!",
+      description: `${label} answers copied successfully.`,
+    });
+  }, [toast]);
+
   // --- COMPREHENSIVE LOADING STATE FOR THE MAIN CONTENT AREA ---
   const isGameContentLoading = useMemo(() => {
     if (!match) return false; // Don't show loading if match is null
@@ -940,39 +1004,163 @@ const MatchPage = () => {
               </Card>
             </div>
         ) : match.status === 'finished' ? (
-          <Card className="bg-card border-card-border border-2 shadow-glow-primary">
-              <div className="p-8 text-center space-y-6">
-                <h2 className="text-4xl font-orbitron font-bold text-foreground">
-                  Quiz Complete!
-                </h2>
-                
-                <div className="text-2xl font-bold">
-                  {(() => {
-                    const otherPlayer = players.find(p => p.uid !== currentUser?.id);
-                    if (!otherPlayer) return null;
-                    
-                    if (currentPlayer.score > otherPlayer.score) {
-                      return <span className="text-success">🏆 You Win! 🏆</span>;
-                    } else if (currentPlayer.score < otherPlayer.score) {
-                      return <span className="text-danger">You Lost!</span>;
-                    } else {
-                      return <span className="text-warning">It's a Tie!</span>;
-                    }
-                  })()}
+          <div className="space-y-6">
+            <Card className="bg-card border-card-border border-2 shadow-glow-primary">
+                <div className="p-8 text-center space-y-6">
+                  <h2 className="text-4xl font-orbitron font-bold text-foreground">
+                    Quiz Complete!
+                  </h2>
+                  
+                  <div className="text-2xl font-bold">
+                    {(() => {
+                      const otherPlayer = players.find(p => p.uid !== currentUser?.id);
+                      if (!otherPlayer) return null;
+                      
+                      if (currentPlayer.score > otherPlayer.score) {
+                        return <span className="text-success">🏆 You Win! 🏆</span>;
+                      } else if (currentPlayer.score < otherPlayer.score) {
+                        return <span className="text-danger">You Lost!</span>;
+                      } else {
+                        return <span className="text-warning">It's a Tie!</span>;
+                      }
+                    })()}
+                  </div>
+
+                  <ScoreBoard players={players} currentUserId={currentUser?.id} final={true} phase={'finished'} />
+                  
+                  <div className="flex gap-4 justify-center">
+                    <Button
+                      onClick={() => window.location.href = '/'}
+                      className="bg-gradient-primary hover:shadow-glow-primary text-primary-foreground font-orbitron font-bold"
+                    >
+                      New Quiz
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+
+            <Card className="bg-card border-card-border border-2 shadow-glow-primary">
+              <div className="p-6 space-y-6">
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div className="space-y-1">
+                    <h3 className="text-2xl font-orbitron font-bold text-foreground">Answer Review</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Review every question, your answer, the correct answer, and the explanation.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant={reviewFilter === 'all' ? 'default' : 'outline'}
+                      onClick={() => setReviewFilter('all')}
+                      className={`font-orbitron font-bold ${
+                        reviewFilter === 'all'
+                          ? 'bg-gradient-primary text-primary-foreground'
+                          : 'border-neon-blue text-neon-blue hover:bg-neon-blue hover:text-primary-foreground'
+                      }`}
+                    >
+                      All Answers
+                    </Button>
+                    <Button
+                      variant={reviewFilter === 'correct' ? 'default' : 'outline'}
+                      onClick={() => setReviewFilter('correct')}
+                      className={`font-orbitron font-bold ${
+                        reviewFilter === 'correct'
+                          ? 'bg-gradient-success text-primary-foreground'
+                          : 'border-neon-green text-neon-green hover:bg-neon-green hover:text-primary-foreground'
+                      }`}
+                    >
+                      Correct Only
+                    </Button>
+                    <Button
+                      variant={reviewFilter === 'incorrect' ? 'default' : 'outline'}
+                      onClick={() => setReviewFilter('incorrect')}
+                      className={`font-orbitron font-bold ${
+                        reviewFilter === 'incorrect'
+                          ? 'bg-gradient-danger text-primary-foreground'
+                          : 'border-danger text-danger hover:bg-danger hover:text-primary-foreground'
+                      }`}
+                    >
+                      Incorrect Only
+                    </Button>
+                  </div>
                 </div>
 
-                <ScoreBoard players={players} currentUserId={currentUser?.id} final={true} phase={'finished'} />
-                
-                <div className="flex gap-4 justify-center">
+                <div className="flex flex-wrap gap-2">
                   <Button
-                    onClick={() => window.location.href = '/'}
-                    className="bg-gradient-primary hover:shadow-glow-primary text-primary-foreground font-orbitron font-bold"
+                    variant="outline"
+                    onClick={() => copyReviewItems(questionResults, 'All')}
+                    className="border-neon-blue text-neon-blue hover:bg-neon-blue hover:text-primary-foreground font-orbitron font-bold"
                   >
-                    New Quiz
+                    <Copy className="w-4 h-4 mr-2" />
+                    Copy All
                   </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => copyReviewItems(questionResults.filter((item) => item.isCorrect), 'Correct')}
+                    className="border-neon-green text-neon-green hover:bg-neon-green hover:text-primary-foreground font-orbitron font-bold"
+                  >
+                    <Copy className="w-4 h-4 mr-2" />
+                    Copy Correct
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => copyReviewItems(questionResults.filter((item) => !item.isCorrect), 'Incorrect')}
+                    className="border-danger text-danger hover:bg-danger hover:text-primary-foreground font-orbitron font-bold"
+                  >
+                    <Copy className="w-4 h-4 mr-2" />
+                    Copy Incorrect
+                  </Button>
+                </div>
+
+                <div className="space-y-4">
+                  {filteredResults.length ? (
+                    filteredResults.map((result) => (
+                      <div
+                        key={`${result.index}-${result.question}`}
+                        className="rounded-lg border-2 border-card-border bg-card/60 p-4 space-y-3"
+                      >
+                        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-orbitron font-bold text-neon-cyan">
+                              Question {result.index + 1}
+                            </span>
+                            <Badge
+                              variant="outline"
+                              className={`text-xs ${
+                                result.isCorrect
+                                  ? 'border-success text-success'
+                                  : 'border-danger text-danger'
+                              }`}
+                            >
+                              {result.isCorrect ? 'Correct' : 'Incorrect'}
+                            </Badge>
+                          </div>
+                        </div>
+                        <p className="text-lg font-semibold text-foreground">{result.question}</p>
+                        <div className="text-sm text-muted-foreground">
+                          Your answer:{' '}
+                          <span className="font-semibold text-foreground">{result.userAnswer}</span>
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          Correct answer:{' '}
+                          <span className="font-semibold text-success">{result.correctAnswer}</span>
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          Explanation:{' '}
+                          <span className="text-foreground">{result.explanation}</span>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-card-border p-6 text-center text-muted-foreground">
+                      No answers to show for this filter yet.
+                    </div>
+                  )}
                 </div>
               </div>
             </Card>
+          </div>
         ) : null}
       </div>
     </div>
