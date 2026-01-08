@@ -19,7 +19,6 @@ const MatchPage = () => {
   const [players, setPlayers] = useState<Player[]>([]);
   const [answers, setAnswers] = useState<Answer[]>([]);
   const [roundAnswers, setRoundAnswers] = useState<Answer[]>([]);
-  const [currentQuestionAnswers, setCurrentQuestionAnswers] = useState<Answer[]>([]);
   const [quizSolutions, setQuizSolutions] = useState<QuizSolution[]>([]);
   
   // --- NEW STATE FOR PRE-LOADED DATA ---
@@ -133,13 +132,12 @@ const MatchPage = () => {
         }
       }
 
-      // Fetch answers for current question
+      // Fetch all answers for the match (used for end-of-quiz review)
       if (matchData) {
         const { data: answersData } = await supabase
           .from('answers')
           .select('*')
-          .eq('match_id', matchId)
-          .eq('question_index', matchData.current_question_index);
+          .eq('match_id', matchId);
 
         if (answersData) {
           setAnswers(answersData);
@@ -234,13 +232,6 @@ const MatchPage = () => {
             console.log('➕ New answer received from', playerName, ':', newAnswer.choice_text);
             return [...prev, newAnswer];
           });
-          // Update current question answers for real-time status
-          setCurrentQuestionAnswers(prev => {
-            if (prev.some(a => a.uid === newAnswer.uid && a.question_index === newAnswer.question_index)) {
-              return prev;
-            }
-            return [...prev, newAnswer];
-          });
         } else if (payload.eventType === 'UPDATE' && payload.new) {
           setAnswers(prev => {
             const updatedAnswer = payload.new as Answer;
@@ -250,14 +241,6 @@ const MatchPage = () => {
             );
             console.log('🔄 Answer updated:', updatedAnswer.uid, 'Correct:', updatedAnswer.is_correct);
             return updated;
-          });
-          // Update current question answers
-          setCurrentQuestionAnswers(prev => {
-            const updatedAnswer = payload.new as Answer;
-            return prev.map(a => 
-              a.uid === updatedAnswer.uid && a.question_index === updatedAnswer.question_index 
-                ? updatedAnswer : a
-            );
           });
         }
       })
@@ -286,9 +269,7 @@ const MatchPage = () => {
   useEffect(() => {
     if (match?.status === 'question_reveal') {
       console.log('🧹 Clearing answers for new question:', match.current_question_index);
-      setAnswers([]);
       setSelectedChoice(null);
-      setCurrentQuestionAnswers([]);
       
       // Reset answered status for all players
       if (currentUser) {
@@ -392,6 +373,32 @@ const MatchPage = () => {
       fetchSolutionsIfNeeded();
     }
   }, [match?.status, match?.current_question_index, matchId, allSolutions.length]);
+
+  useEffect(() => {
+    if (match?.status !== 'finished' || !matchId) return;
+
+    const fetchReviewData = async () => {
+      const { data: answersData } = await supabase
+        .from('answers')
+        .select('*')
+        .eq('match_id', matchId);
+
+      if (answersData) {
+        setAnswers(answersData);
+      }
+
+      if (!allSolutions.length) {
+        try {
+          const solutions = await getQuizSolutions(matchId);
+          setAllSolutions(solutions);
+        } catch (error) {
+          console.error('❌ Failed to fetch solutions at finished:', error);
+        }
+      }
+    };
+
+    fetchReviewData();
+  }, [match?.status, matchId, allSolutions.length]);
 
   // 🔧 CHANGED: score the round WITHOUT flipping phase on the client.
   // The server function now flips to 'round_end'. Also wrapped in a mutex.
