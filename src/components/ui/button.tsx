@@ -9,18 +9,18 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
-        destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
-        outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
-        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
+        default: "bg-primary text-primary-foreground [@media(hover:hover)]:hover:bg-primary/90",
+        destructive: "bg-destructive text-destructive-foreground [@media(hover:hover)]:hover:bg-destructive/90",
+        outline: "border border-input bg-background [@media(hover:hover)]:hover:bg-accent [@media(hover:hover)]:hover:text-accent-foreground",
+        secondary: "bg-secondary text-secondary-foreground [@media(hover:hover)]:hover:bg-secondary/80",
+        ghost: "[@media(hover:hover)]:hover:bg-accent [@media(hover:hover)]:hover:text-accent-foreground",
+        link: "text-primary underline-offset-4 [@media(hover:hover)]:hover:underline",
         // Neon gaming variants
-        neon: "bg-gradient-primary text-primary-foreground hover:shadow-glow-primary transition-all duration-300 border border-primary/50 font-orbitron font-bold",
-        neonSecondary: "bg-gradient-secondary text-secondary-foreground hover:shadow-glow-secondary transition-all duration-300 border border-secondary/50 font-orbitron font-bold",
-        neonSuccess: "bg-gradient-success text-success-foreground hover:shadow-glow-success transition-all duration-300 border border-success/50 font-orbitron font-bold",
-        neonDanger: "bg-gradient-danger text-danger-foreground hover:shadow-glow-danger transition-all duration-300 border border-danger/50 font-orbitron font-bold",
-        neonOutline: "border-2 border-primary bg-transparent text-primary hover:bg-primary hover:text-primary-foreground hover:shadow-glow-primary transition-all duration-300 font-orbitron font-bold",
+        neon: "bg-gradient-primary text-primary-foreground [@media(hover:hover)]:hover:shadow-glow-primary transition-all duration-300 border border-primary/50 font-orbitron font-bold",
+        neonSecondary: "bg-gradient-secondary text-secondary-foreground [@media(hover:hover)]:hover:shadow-glow-secondary transition-all duration-300 border border-secondary/50 font-orbitron font-bold",
+        neonSuccess: "bg-gradient-success text-success-foreground [@media(hover:hover)]:hover:shadow-glow-success transition-all duration-300 border border-success/50 font-orbitron font-bold",
+        neonDanger: "bg-gradient-danger text-danger-foreground [@media(hover:hover)]:hover:shadow-glow-danger transition-all duration-300 border border-danger/50 font-orbitron font-bold",
+        neonOutline: "border-2 border-primary bg-transparent text-primary [@media(hover:hover)]:hover:bg-primary [@media(hover:hover)]:hover:text-primary-foreground [@media(hover:hover)]:hover:shadow-glow-primary transition-all duration-300 font-orbitron font-bold",
       },
       size: {
         default: "h-10 px-4 py-2",
