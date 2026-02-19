@@ -855,7 +855,7 @@ const MatchPage = () => {
                           className={`h-auto min-h-16 text-left justify-start whitespace-normal py-4 ${
                             isSelected 
                               ? 'border-neon-green bg-neon-green/10 text-neon-green shadow-glow-success' 
-                              : 'border-card-border hover:border-primary hover:text-primary'
+                              : 'border-card-border md:hover:border-primary md:hover:text-primary'
                           } ${isDisabled && !isSelected ? 'opacity-50' : ''}`}
                         >
                           <span className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center mr-3 font-orbitron font-bold flex-shrink-0">
